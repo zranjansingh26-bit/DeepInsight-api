@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     supabase_service_role_key: str = ""
     supabase_jwt_secret: str = ""
     supabase_storage_bucket: str = "datasets"
+    supabase_models_bucket: str = "models"
 
     # ── LLM Providers ────────────────────────────────────────
     llm_provider: str = "Claude"  # Claude | OpenAI | Gemini

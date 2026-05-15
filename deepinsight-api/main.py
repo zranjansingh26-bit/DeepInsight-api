@@ -117,11 +117,13 @@ from api.datasets import router as dataset_router
 from api.analysis import router as analysis_router
 from api.chat import router as chat_router
 from api.reports import router as reports_router
+from api.ml import router as ml_router
 
 app.include_router(dataset_router, prefix="/api/datasets", tags=["Datasets"])
 app.include_router(analysis_router, prefix="/api/analysis", tags=["Analysis"])
 app.include_router(chat_router, prefix="/api/chat", tags=["Chat"])
 app.include_router(reports_router, prefix="/api/reports", tags=["Reports"])
+app.include_router(ml_router, prefix="/api/ml", tags=["Machine Learning"])
 
 
 # ── Health Check ─────────────────────────────────────────────
@@ -136,6 +138,10 @@ async def root():
         "version": settings.app_version,
         "environment": settings.app_env,
     }
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host=settings.host, port=settings.port, reload=True)
 
 
 @app.get("/health", tags=["Health"])
