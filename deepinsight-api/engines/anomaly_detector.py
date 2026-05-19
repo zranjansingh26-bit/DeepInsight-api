@@ -1,7 +1,7 @@
 """
 DeepInsight Starter Suite — Anomaly Detector Engine.
 
-Detects anomalies using IQR and Z-score methods on numeric columns.
+Detects anomalies using IQR, Z-score, Isolation Forest, Local Outlier Factor, and DBSCAN on numeric columns.
 """
 
 import logging
@@ -9,6 +9,10 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+from sklearn.ensemble import IsolationForest
+from sklearn.neighbors import LocalOutlierFactor
+from sklearn.cluster import DBSCAN
+from sklearn.preprocessing import StandardScaler
 
 logger = logging.getLogger(__name__)
 
@@ -23,44 +27,90 @@ def detect_anomalies(
 
     Args:
         df: Input DataFrame
-        method: Detection method — 'iqr' or 'zscore'
-        threshold: IQR multiplier (default 1.5) or Z-score cutoff (default 3)
+        method: Detection method — 'iqr', 'zscore', 'isolation_forest', 'lof', or 'dbscan'
+        threshold: Method-specific sensitivity/threshold.
 
     Returns:
-        Dictionary with anomaly counts and indices per column.
+        Dictionary with anomaly counts, indices, and values.
     """
     numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     if not numeric_cols:
         return {"error": "No numeric columns found for anomaly detection."}
 
-    if method == "zscore":
-        threshold = threshold if threshold != 1.5 else 3.0
-
     all_anomalies = {}
     total_anomalies = 0
 
-    for col in numeric_cols:
-        series = df[col].dropna()
-        if len(series) < 4:
-            continue
+    # Multivariate methods run on the whole numeric dataset at once
+    if method in ["isolation_forest", "lof", "dbscan"]:
+        # Drop rows with NaNs across numeric columns for sklearn models
+        valid_df = df[numeric_cols].dropna()
+        if len(valid_df) < 10:
+            return {"error": f"Need at least 10 valid data points for {method}."}
+            
+        # Normalize features
+        scaler = StandardScaler()
+        scaled_data = scaler.fit_transform(valid_df)
+        
+        indices = []
+        if method == "isolation_forest":
+            contamination = threshold if 0 < threshold <= 0.5 else 0.05
+            model = IsolationForest(contamination=contamination, random_state=42)
+            preds = model.fit_predict(scaled_data)
+            indices = valid_df.index[preds == -1].tolist()
+        elif method == "lof":
+            contamination = threshold if 0 < threshold <= 0.5 else 0.05
+            model = LocalOutlierFactor(contamination=contamination)
+            preds = model.fit_predict(scaled_data)
+            indices = valid_df.index[preds == -1].tolist()
+        elif method == "dbscan":
+            eps = threshold if threshold > 0 else 0.5
+            model = DBSCAN(eps=eps, min_samples=5)
+            preds = model.fit_predict(scaled_data)
+            indices = valid_df.index[preds == -1].tolist()
 
-        if method == "iqr":
-            indices = _iqr_anomalies(series, threshold)
-        else:
-            indices = _zscore_anomalies(series, threshold)
+        total_anomalies = len(indices)
+        
+        # Format output similar to column-wise methods for frontend compatibility, 
+        # or we can attach the global anomalies to all numeric columns.
+        for col in numeric_cols:
+            anomaly_values = df.loc[indices, col].tolist() if indices else []
+            anomaly_values = [
+                float(v) if np.isfinite(v) else 0.0 for v in anomaly_values
+            ]
+            all_anomalies[col] = {
+                "count": total_anomalies,
+                "percentage": round(total_anomalies / len(df) * 100, 2),
+                "indices": indices,
+                "values": anomaly_values[:50],  # Limit to 50
+            }
+            
+    else:
+        # Univariate methods
+        if method == "zscore":
+            threshold = threshold if threshold != 1.5 else 3.0
 
-        anomaly_values = df.loc[indices, col].tolist() if indices else []
-        anomaly_values = [
-            float(v) if np.isfinite(v) else 0.0 for v in anomaly_values
-        ]
+        for col in numeric_cols:
+            series = df[col].dropna()
+            if len(series) < 4:
+                continue
 
-        all_anomalies[col] = {
-            "count": len(indices),
-            "percentage": round(len(indices) / len(series) * 100, 2),
-            "indices": indices,
-            "values": anomaly_values[:50],  # Limit to 50
-        }
-        total_anomalies += len(indices)
+            if method == "iqr":
+                indices = _iqr_anomalies(series, threshold)
+            else:
+                indices = _zscore_anomalies(series, threshold)
+
+            anomaly_values = df.loc[indices, col].tolist() if indices else []
+            anomaly_values = [
+                float(v) if np.isfinite(v) else 0.0 for v in anomaly_values
+            ]
+
+            all_anomalies[col] = {
+                "count": len(indices),
+                "percentage": round(len(indices) / len(series) * 100, 2),
+                "indices": indices,
+                "values": anomaly_values[:50],  # Limit to 50
+            }
+            total_anomalies += len(indices)
 
     result = {
         "method": method,

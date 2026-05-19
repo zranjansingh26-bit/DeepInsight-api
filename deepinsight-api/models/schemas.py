@@ -8,7 +8,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, AliasChoices
 
 
 # ── Enums ────────────────────────────────────────────────────
@@ -99,6 +99,32 @@ class AnalysisRequest(BaseModel):
         default=[AnalysisType.QUALITY],
         description="List of analysis types to run",
     )
+
+
+class ForecastRequest(BaseModel):
+    """Request to run forecasting."""
+    model: str = Field(default="sarima", validation_alias=AliasChoices("model", "model_type"))
+    target_column: Optional[str] = Field(default=None, validation_alias=AliasChoices("target_column", "value_column"))
+    date_column: Optional[str] = None
+    forecast_horizon: int = Field(default=30, validation_alias=AliasChoices("forecast_horizon", "periods"))
+
+    @property
+    def model_type(self) -> str:
+        return self.model
+
+    @property
+    def value_column(self) -> Optional[str]:
+        return self.target_column
+
+    @property
+    def periods(self) -> int:
+        return self.forecast_horizon
+
+
+class AnomalyRequest(BaseModel):
+    """Request to run anomaly detection."""
+    method: str = "iqr"
+    threshold: float = 1.5
 
 
 class ChartData(BaseModel):

@@ -150,11 +150,12 @@ def generate_forecast_chart(
     historical_dates: list[str], historical_values: list[float],
     forecast_dates: list[str], forecast_values: list[float],
     conf_lower: list[float], conf_upper: list[float], value_col: str,
+    title: str | None = None,
 ) -> dict[str, Any]:
     """Generate a forecast chart with confidence interval."""
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=historical_dates, y=historical_values, mode="lines", name="Historical", line=dict(color="#6366f1")))
     fig.add_trace(go.Scatter(x=forecast_dates, y=forecast_values, mode="lines", name="Forecast", line=dict(color="#f59e0b", dash="dash")))
     fig.add_trace(go.Scatter(x=forecast_dates + forecast_dates[::-1], y=conf_upper + conf_lower[::-1], fill="toself", fillcolor="rgba(245,158,11,0.15)", line=dict(color="rgba(255,255,255,0)"), name="95% Confidence"))
-    fig.update_layout(title=f"SARIMA Forecast — {value_col}", template="plotly_dark", xaxis_title="Date", yaxis_title=value_col)
+    fig.update_layout(title=title or f"Forecast — {value_col}", template="plotly_dark", xaxis_title="Date", yaxis_title=value_col)
     return _fig_to_dict(fig)

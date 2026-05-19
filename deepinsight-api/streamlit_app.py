@@ -105,6 +105,16 @@ def check_health():
     except:
         return False
 
+def show_api_error(prefix: str, resp):
+    try:
+        data = resp.json()
+        if isinstance(data, dict) and "detail" in data:
+            st.error(f"❌ {prefix}: {data['detail']}")
+        else:
+            st.error(f"❌ {prefix}: {resp.text}")
+    except Exception:
+        st.error(f"❌ {prefix}: {resp.text}")
+
 # ── State Management ──────────────────────────────────────────
 
 if "dataset_id" not in st.session_state:
@@ -132,7 +142,10 @@ else:
 
 # ── Main Content ──────────────────────────────────────────────
 
-tab1, tab2, tab3, tab4 = st.tabs(["📤 Upload", "📊 Overview", "🤖 AI Chat", "🧪 Model Comparison Lab"])
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    "📤 Upload", "📊 Overview", "🤖 AI Chat", "🧪 Model Comparison Lab", 
+    "📈 Time Series Forecast", "🚨 Anomaly Detection"
+])
 
 # ── Tab 1: Upload ─────────────────────────────────────────────
 
@@ -284,7 +297,7 @@ with tab2:
                                     if st.checkbox("Show Raw Data", key=f"raw_{analysis['analysis_type']}"):
                                         st.json(analysis["results"])
                         else:
-                            st.error(f"Analysis failed: {resp.text}")
+                            show_api_error("Analysis failed", resp)
                     except Exception as e:
                         st.error(f"Error connecting to API: {str(e)}")
 
@@ -666,6 +679,159 @@ with tab4:
                     st.info("No comparison data available yet.")
             else:
                 st.info("Train at least one model to enable comparison.")
+
+# ── Tab 5: Time Series Forecast ─────────────────────────────────
+
+with tab5:
+    if not st.session_state.dataset_id:
+        st.info("Upload a dataset first to run time series forecasting.")
+    else:
+        st.header("📈 Time Series Forecasting")
+        st.markdown("Predict future values using advanced statistical models.")
+        
+        meta = st.session_state.dataset_meta
+        col_names = [c["name"] for c in meta["columns"]]
+        date_candidates = [c["name"] for c in meta["columns"] if "date" in str(c.get("dtype", "")).lower() or "object" in str(c.get("dtype", "")).lower() or "datetime" in str(c.get("dtype", "")).lower()]
+        numeric_cols = [c["name"] for c in meta["columns"] if "int" in str(c.get("dtype", "")).lower() or "float" in str(c.get("dtype", "")).lower()]
+
+        fc_c1, fc_c2, fc_c3, fc_c4 = st.columns(4)
+        with fc_c1:
+            date_col = st.selectbox("Date Column (Optional)", ["Auto-detect"] + col_names, index=0)
+        with fc_c2:
+            val_col = st.selectbox("Target Value Column", ["Auto-detect"] + numeric_cols, index=0)
+        with fc_c3:
+            model_opts = {
+                "ARIMA / SARIMA": "sarima",
+                "Exponential Smoothing": "exponential_smoothing",
+                "Moving Average": "moving_average",
+                "Prophet": "prophet"
+            }
+            model_disp = st.selectbox("Forecasting Algorithm", list(model_opts.keys()))
+            model_type = model_opts[model_disp]
+        with fc_c4:
+            periods = st.number_input("Forecast Horizon (periods)", min_value=1, max_value=365, value=30)
+            
+        if st.button("🚀 Run Forecast", use_container_width=True):
+            with st.spinner(f"Running {model_disp} forecast..."):
+                payload = {
+                    "model": model_type,
+                    "target_column": None if val_col == "Auto-detect" else val_col,
+                    "date_column": None if date_col == "Auto-detect" else date_col,
+                    "forecast_horizon": periods
+                }
+                try:
+                    resp = httpx.post(
+                        f"{API_BASE_URL}/api/forecast/run/{st.session_state.dataset_id}",
+                        headers=get_headers(),
+                        json=payload,
+                        timeout=180.0
+                    )
+                    if resp.status_code == 200:
+                        st.success("Forecast generated successfully!")
+                        st.session_state["last_forecast"] = resp.json()
+                    else:
+                        show_api_error("Forecast failed", resp)
+                except Exception as e:
+                    st.error(f"Error: {e}")
+                    
+        if "last_forecast" in st.session_state:
+            res = st.session_state["last_forecast"]
+            st.markdown("---")
+            
+            if res.get("charts"):
+                st.plotly_chart(res["charts"][0]["data"], use_container_width=True)
+            
+            st.markdown("### 📊 Forecast Summary")
+            r_data = res.get("results", {})
+            model_name_mapped = {
+                "sarima": "ARIMA / SARIMA (Seasonal Autoregressive Integrated Moving Average)",
+                "exponential_smoothing": "Holt-Winters Exponential Smoothing",
+                "moving_average": "Simple Moving Average (Rolling Mean)",
+                "prophet": "Prophet (Additive Regression Trend + Seasonality)"
+            }.get(r_data.get("model_type", "").lower(), r_data.get("model_type", "Unknown"))
+            
+            col_s1, col_s2, col_s3 = st.columns(3)
+            col_s1.metric("Forecasting Algorithm", r_data.get("model_type", "Unknown").upper())
+            col_s2.metric("Target Value Column", r_data.get("value_column", "Unknown"))
+            col_s3.metric("Horizon (periods)", f"{r_data.get('periods', periods)}")
+            
+            with st.expander("⚙️ Model Parameters & Details", expanded=True):
+                st.markdown(f"**Forecasting Method:** {model_name_mapped}")
+                st.markdown(f"**Data Frequency:** `{r_data.get('frequency', 'Unknown')}`")
+                st.markdown(f"**Detected Seasonal Period:** `{r_data.get('seasonal_period', 1)}`")
+                if r_data.get("model_type") == "sarima":
+                    st.markdown("**Order Parameters:** `(p, d, q) = (1, 1, 1)`")
+                elif r_data.get("model_type") == "exponential_smoothing":
+                    st.markdown("**Smoothing Parameters:** `Trend: Additive | Seasonality: Additive`")
+                elif r_data.get("model_type") == "moving_average":
+                    st.markdown("**Window Size:** `7 periods (default)`")
+                elif r_data.get("model_type") == "prophet":
+                    st.markdown("**Growth Mode:** `Linear` | **Seasonalities:** `Yearly, Weekly`")
+                
+                if st.checkbox("Show Raw Forecast JSON Data"):
+                    st.json(r_data)
+
+# ── Tab 6: Anomaly Detection ──────────────────────────────────
+
+with tab6:
+    if not st.session_state.dataset_id:
+        st.info("Upload a dataset first to run anomaly detection.")
+    else:
+        st.header("🚨 Anomaly Detection")
+        st.markdown("Detect outliers, unusual patterns, and data anomalies.")
+        
+        an_c1, an_c2 = st.columns(2)
+        with an_c1:
+            an_method = st.selectbox("Detection Algorithm", [
+                "isolation_forest", "lof", "dbscan", "iqr", "zscore"
+            ], format_func=lambda x: x.replace("_", " ").title() if x != "lof" and x != "iqr" else x.upper())
+        with an_c2:
+            if an_method in ["isolation_forest", "lof"]:
+                an_thresh = st.slider("Contamination (Sensitivity)", min_value=0.01, max_value=0.5, value=0.05, step=0.01)
+            elif an_method == "dbscan":
+                an_thresh = st.number_input("EPS Distance", value=0.5, step=0.1)
+            elif an_method == "zscore":
+                an_thresh = st.slider("Z-Score Cutoff", min_value=1.0, max_value=5.0, value=3.0, step=0.1)
+            else:
+                an_thresh = st.slider("IQR Multiplier", min_value=1.0, max_value=5.0, value=1.5, step=0.1)
+                
+        if st.button("🔍 Detect Anomalies", use_container_width=True):
+            with st.spinner(f"Running {an_method} anomaly detection..."):
+                payload = {
+                    "method": an_method,
+                    "threshold": an_thresh
+                }
+                try:
+                    resp = httpx.post(
+                        f"{API_BASE_URL}/api/anomaly/run/{st.session_state.dataset_id}",
+                        headers=get_headers(),
+                        json=payload,
+                        timeout=180.0
+                    )
+                    if resp.status_code == 200:
+                        st.success("Anomalies detected successfully!")
+                        st.session_state["last_anomaly"] = resp.json()
+                    else:
+                        show_api_error("Anomaly detection failed", resp)
+                except Exception as e:
+                    st.error(f"Error: {e}")
+                    
+        if "last_anomaly" in st.session_state:
+            res = st.session_state["last_anomaly"]
+            st.markdown("---")
+            total = res.get("results", {}).get("total_anomalies", 0)
+            
+            st.markdown(f'<div class="status-card" style="border-left-color: #ef4444;"><h3 style="margin:0;color:#ef4444">{total} Total Anomalies Detected</h3></div>', unsafe_allow_html=True)
+            
+            charts = res.get("charts", [])
+            if charts:
+                cols = st.columns(len(charts) if len(charts) <= 2 else 2)
+                for idx, chart in enumerate(charts):
+                    with cols[idx % 2]:
+                        st.plotly_chart(chart["data"], use_container_width=True)
+                        
+            with st.expander("View Detailed Anomaly Stats"):
+                st.json(res.get("results", {}).get("anomalies_by_column", {}))
 
 # ── Footer ────────────────────────────────────────────────────
 

@@ -86,9 +86,15 @@ class ModelFactory:
         return model_class(**kwargs)
 
     @classmethod
-    def get_grid(cls, model_name: str) -> dict:
+    def get_grid(cls, model_name: str, problem_type: str = "classification") -> dict:
         """Get hyperparameter grid for a model."""
-        return cls.GRIDS.get(model_name, {})
+        grid = cls.GRIDS.get(model_name, {}).copy()
+        if problem_type == "regression":
+            if "probability" in grid:
+                del grid["probability"]
+            if model_name == "Decision Tree" and "criterion" in grid:
+                grid["criterion"] = ["squared_error", "friedman_mse"]
+        return grid
 
     @classmethod
     def list_available(cls, problem_type: str) -> list[str]:

@@ -11,6 +11,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from db import repository
+from models.schemas import AnalysisType
 from engines.stats_profiler import compute_descriptive_stats
 
 logger = logging.getLogger(__name__)
@@ -81,6 +83,41 @@ def build_context(df: pd.DataFrame, dataset_meta: dict | None = None) -> str:
             top_str = ", ".join(f"{k}({v})" for k, v in top_vals)
             parts.append(f"- **{col}**: {s['unique_count']} unique — top: {top_str}")
         parts.append("")
+
+    # ── Inject recent Advanced Analytics (Forecast / Anomaly) ──
+    if dataset_meta and "id" in dataset_meta:
+        dataset_id = dataset_meta["id"]
+        
+        # Check for Anomaly
+        anomaly = repository.get_analysis(dataset_id, AnalysisType.ANOMALY.value)
+        if anomaly:
+            parts.append("## Recent Anomaly Detection")
+            res = anomaly.get("results", {})
+            parts.append(f"- **Method used**: {res.get('method', 'Unknown')}")
+            parts.append(f"- **Total anomalies detected**: {res.get('total_anomalies', 0)}")
+            anom_by_col = res.get("anomalies_by_column", {})
+            for col, info in list(anom_by_col.items())[:5]:
+                if info.get("count", 0) > 0:
+                    parts.append(f"- **{col}**: {info.get('count')} anomalies ({info.get('percentage')}%)")
+            parts.append("")
+
+        # Check for Forecast
+        forecast = repository.get_analysis(dataset_id, AnalysisType.FORECAST.value)
+        if forecast:
+            parts.append("## Recent Time Series Forecast")
+            res = forecast.get("results", {})
+            parts.append(f"- **Model**: {res.get('model_type', 'Unknown')}")
+            parts.append(f"- **Target Column**: {res.get('value_column', 'Unknown')}")
+            parts.append(f"- **Date Column**: {res.get('date_column', 'Unknown')}")
+            parts.append(f"- **Periods forecasted**: {res.get('periods', 0)}")
+            
+            fc_dates = res.get("forecast_dates", [])
+            fc_vals = res.get("forecast_values", [])
+            if fc_dates and fc_vals:
+                parts.append("### Forecasted Values (first 5 steps)")
+                for d, v in zip(fc_dates[:5], fc_vals[:5]):
+                    parts.append(f"- {d}: {round(v, 2) if isinstance(v, (int, float)) else v}")
+            parts.append("")
 
     context = "\n".join(parts)
 
