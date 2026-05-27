@@ -1,7 +1,8 @@
 """
 DeepInsight Starter Suite — Report Service.
 
-Generates JSON, HTML, and PDF reports from analysis results.
+Generates JSON, HTML, PDF, and enterprise-grade PPTX reports
+with AI executive summaries from analysis results.
 """
 
 import io
@@ -13,6 +14,7 @@ from typing import Any
 from db import repository
 from services.dataset_service import get_dataset
 from models.schemas import ReportFormat
+from services import llm_client
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +44,7 @@ async def generate_report(
     if analysis_types:
         analyses = [a for a in analyses if a["analysis_type"] in analysis_types]
 
-    report_data = _build_report_data(dataset, analyses)
+    report_data = await _build_report_data(dataset, analyses)
 
     if report_format == ReportFormat.JSON:
         return {
@@ -71,14 +73,29 @@ async def generate_report(
             "format": "pdf",
             "download_url": storage_path,
         }
+    elif report_format == ReportFormat.PPTX:
+        pptx_bytes = _generate_pptx_report(report_data)
+        storage_path = repository.upload_file_to_storage(
+            user_id=dataset["user_id"],
+            file_name=f"presentation_{dataset_id[:8]}.pptx",
+            file_content=pptx_bytes,
+            content_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        )
+        return {
+            "dataset_id": dataset_id,
+            "format": "pptx",
+            "download_url": storage_path,
+        }
     else:
         raise ValueError(f"Unsupported report format: {report_format}")
 
 
-def _build_report_data(
+async def _build_report_data(
     dataset: dict, analyses: list[dict]
 ) -> dict[str, Any]:
-    """Build the structured report data."""
+    """Build the structured report data and generate executive narrative."""
+    narrative, exec_summary = await _generate_executive_narrative(dataset, analyses)
+
     return {
         "title": f"DeepInsight Report — {dataset['file_name']}",
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -105,7 +122,82 @@ def _build_report_data(
             "total_analyses": len(analyses),
             "analysis_types": [a["analysis_type"] for a in analyses],
         },
+        "executive_narrative": narrative,
+        "executive_summary": exec_summary,
     }
+
+
+async def _generate_executive_narrative(dataset: dict, analyses: list[dict]) -> tuple[str, dict]:
+    """
+    Generate a structured multi-section executive summary using LLM.
+    Returns (raw_narrative_str, structured_sections_dict).
+    """
+    analysis_types = [a.get("analysis_type", a.get("type", "")) for a in analyses]
+
+    # Pull key metrics for richer prompting
+    anomaly = next((a for a in analyses if a.get("analysis_type") == "anomaly"), None)
+    forecast = next((a for a in analyses if a.get("analysis_type") == "forecast"), None)
+    anomaly_info = ""
+    if anomaly:
+        res = anomaly.get("results", {})
+        anomaly_info = f"Anomalies detected: {res.get('total_anomalies', 0)} via {res.get('method','iqr')}."
+    forecast_info = ""
+    if forecast:
+        res = forecast.get("results", {})
+        forecast_info = f"Forecast: {res.get('periods',0)} periods, model={res.get('model_type','N/A')}, target={res.get('value_column','N/A')}."
+
+    prompt = f"""You are a senior Data Scientist and Executive Business Analyst generating a board-ready report.
+
+Dataset: {dataset['file_name']} ({dataset.get('file_type','CSV')})
+Rows: {dataset.get('row_count',0):,} | Columns: {dataset.get('column_count',0)}
+Quality Score: {dataset.get('quality_score',0)}% | Null Rate: {dataset.get('null_percentage',0):.1f}%
+Analyses Performed: {', '.join(analysis_types) if analysis_types else 'None'}
+{anomaly_info}
+{forecast_info}
+
+Write a structured executive report with EXACTLY these 7 JSON keys.
+Respond ONLY with valid JSON, no markdown fences:
+{{
+  "overview": "2-3 sentence high-level business overview of this dataset and analysis.",
+  "performance_insights": "Key performance findings and trends observed in the data.",
+  "forecast_insights": "Summary of forecasting results and what they imply for the business. If no forecast, say so.",
+  "anomaly_insights": "Anomaly detection findings and associated risk signals. If no anomaly data, say so.",
+  "model_performance": "ML model performance summary and best model recommendation. If no ML, say so.",
+  "recommendations": "3-5 concrete strategic business recommendations based on findings.",
+  "conclusion": "1-2 sentence confident closing statement."
+}}"""
+
+    default_sections = {
+        "overview": f"Analysis report for {dataset['file_name']} ({dataset.get('row_count',0):,} rows, {dataset.get('column_count',0)} columns).",
+        "performance_insights": "Performance analysis has been completed. Review detailed charts for trends.",
+        "forecast_insights": forecast_info or "No forecasting data available.",
+        "anomaly_insights": anomaly_info or "No anomaly detection data available.",
+        "model_performance": "No ML model data available.",
+        "recommendations": "Review data quality and run additional analyses for targeted recommendations.",
+        "conclusion": "Further analysis is recommended to derive actionable business intelligence.",
+    }
+
+    try:
+        response = await llm_client.chat_completion(
+            system_prompt="You are an expert Executive Business Analyst. Output only valid JSON.",
+            user_message=prompt
+        )
+        raw = response.answer.strip()
+        # Strip markdown code fences if present
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+        import json as _json
+        sections = _json.loads(raw)
+        # Ensure all keys exist
+        for k in default_sections:
+            if k not in sections:
+                sections[k] = default_sections[k]
+        narrative = "\n\n".join([f"### {k.replace('_',' ').title()}\n{v}" for k, v in sections.items()])
+        return narrative, sections
+    except Exception as e:
+        logger.warning(f"Executive narrative generation failed: {e}")
+        narrative = "\n\n".join([f"### {k.replace('_',' ').title()}\n{v}" for k, v in default_sections.items()])
+        return narrative, default_sections
 
 
 def _render_html_report(report_data: dict) -> str:
@@ -194,6 +286,11 @@ def _render_html_report(report_data: dict) -> str:
             </div>
         </div>
 
+        <h2>Executive Summary & Narrative</h2>
+        <div class="card">
+            <p style="white-space: pre-wrap;">{report_data.get('executive_narrative', 'N/A')}</p>
+        </div>
+
         <h2>Analysis Results ({report_data['summary']['total_analyses']})</h2>
         {analyses_html}
 
@@ -250,3 +347,9 @@ def _generate_pdf_report(report_data: dict) -> bytes:
     pdf.cell(0, 6, "DeepInsight Starter Suite - AI-Powered Analytics", new_x="LMARGIN", new_y="NEXT", align="C")
 
     return pdf.output()
+
+
+def _generate_pptx_report(report_data: dict) -> bytes:
+    """Generate an enterprise-grade PPTX report using PptxBuilder."""
+    from services.pptx_service import generate_pptx
+    return generate_pptx(report_data)

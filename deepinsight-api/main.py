@@ -13,20 +13,50 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+
+import sentry_sdk
+import structlog
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 from config import get_settings
+from middleware.auth_middleware import AuthContextMiddleware
+from middleware.observability import get_metrics
 
 # ── Logging Setup ────────────────────────────────────────────
 
 settings = get_settings()
 
-logging.basicConfig(
-    level=getattr(logging, settings.log_level.upper(), logging.INFO),
-    format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    stream=sys.stdout,
+# Initialize Sentry
+if getattr(settings, "sentry_dsn", None):
+    sentry_sdk.init(
+        dsn=settings.sentry_dsn,
+        traces_sample_rate=1.0,
+        profiles_sample_rate=1.0,
+        environment=settings.app_env
+    )
+
+structlog.configure(
+    processors=[
+        structlog.stdlib.add_log_level,
+        structlog.stdlib.PositionalArgumentsFormatter(),
+        structlog.processors.TimeStamper(fmt="iso"),
+        structlog.processors.StackInfoRenderer(),
+        structlog.processors.format_exc_info,
+        structlog.dev.ConsoleRenderer() if settings.app_env == "development" else structlog.processors.JSONRenderer()
+    ],
+    context_class=dict,
+    logger_factory=structlog.stdlib.LoggerFactory(),
+    wrapper_class=structlog.stdlib.BoundLogger,
+    cache_logger_on_first_use=True,
 )
-logger = logging.getLogger("deepinsight")
+
+logger = structlog.get_logger("deepinsight")
+
+# Initialize Rate Limiter
+limiter = Limiter(key_func=get_remote_address)
 
 
 # ── Lifecycle ────────────────────────────────────────────────
@@ -65,6 +95,9 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 # ── CORS Middleware ──────────────────────────────────────────
 
 app.add_middleware(
@@ -75,23 +108,35 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ── Custom Middleware ────────────────────────────────────────
+
+app.add_middleware(AuthContextMiddleware)
+
 
 # ── Request Logging Middleware ───────────────────────────────
 
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
-    """Log incoming requests with timing."""
+    """Log incoming requests with timing and record metrics."""
     start = time.perf_counter()
     response = await call_next(request)
-    duration = (time.perf_counter() - start) * 1000
+    duration_ms = (time.perf_counter() - start) * 1000
+    
     logger.info(
         "%s %s -> %d (%.1fms)",
         request.method,
         request.url.path,
         response.status_code,
-        duration,
+        duration_ms,
     )
+    
+    get_metrics().record_request(
+        path=request.url.path,
+        status_code=response.status_code,
+        latency_ms=duration_ms
+    )
+    
     return response
 
 
@@ -120,6 +165,18 @@ from api.reports import router as reports_router
 from api.ml import router as ml_router
 from api.forecast import router as forecast_router
 from api.anomaly import router as anomaly_router
+from api.billing import router as billing_router
+from api.jobs import router as jobs_router
+from api.documents import router as documents_router
+from api.audit import router as audit_router
+from api.connectors import router as connectors_router
+from api.auth import router as auth_router
+from api.admin import router as admin_router
+from api.documents import router as documents_router
+from api.report_editor import router as report_editor_router
+from api.organizations import router as organizations_router
+from api.schedules import router as schedules_router
+from api.ai_utils import router as ai_utils_router
 
 app.include_router(dataset_router, prefix="/api/datasets", tags=["Datasets"])
 app.include_router(analysis_router, prefix="/api/analysis", tags=["Analysis"])
@@ -128,13 +185,28 @@ app.include_router(reports_router, prefix="/api/reports", tags=["Reports"])
 app.include_router(ml_router, prefix="/api/ml", tags=["Machine Learning"])
 app.include_router(forecast_router, prefix="/api/forecast", tags=["Forecast"])
 app.include_router(anomaly_router, prefix="/api/anomaly", tags=["Anomaly"])
+app.include_router(billing_router, prefix="/api/billing", tags=["Billing"])
+app.include_router(jobs_router, prefix="/api/jobs", tags=["Jobs"])
+app.include_router(documents_router, prefix="/api/documents", tags=["Documents"])
+app.include_router(audit_router, prefix="/api/audit", tags=["Audit"])
+app.include_router(connectors_router, prefix="/api/connectors", tags=["Connectors"])
+app.include_router(auth_router, prefix="/api/auth", tags=["Auth"])
+app.include_router(admin_router, prefix="/api/admin", tags=["Admin"])
+app.include_router(report_editor_router, prefix="/api/report-editor", tags=["Report Editor"])
+app.include_router(organizations_router, prefix="/api/orgs", tags=["Organizations"])
+app.include_router(schedules_router, prefix="/api/schedules", tags=["Schedules"])
+app.include_router(ai_utils_router, tags=["AI Utilities"])
+
+# ── Serve Frontend Static Files ─────────────────────
+app.mount("/app", StaticFiles(directory="frontend", html=True), name="frontend")
 
 
 # ── Health Check ─────────────────────────────────────────────
 
 
 @app.get("/", tags=["Health"])
-async def root():
+@limiter.limit("5/minute")
+async def root(request: Request):
     """Health check endpoint."""
     return {
         "status": "healthy",

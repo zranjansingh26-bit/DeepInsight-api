@@ -8,7 +8,7 @@ import logging
 from typing import Any
 
 from db import repository
-from engines.forecaster import run_forecast
+from engines.forecaster import run_forecast, run_forecast_comparison
 from engines.chart_generator import generate_forecast_chart
 from models.schemas import AnalysisType
 from services.dataset_service import get_dataset, get_dataframe
@@ -47,15 +47,37 @@ async def run_forecasting(
     }
     model_key = alias_map.get(normalized_model, normalized_model)
     # Validate model_key
-    if model_key not in {"moving_average", "exponential_smoothing", "sarima", "prophet"}:
+    if model_key == "compare":
+        result = run_forecast_comparison(df, date_col=date_col, value_col=value_col, periods=periods)
+    elif model_key not in {"moving_average", "exponential_smoothing", "sarima", "prophet"}:
         raise ValueError(f"Unsupported model type: {model_type}")
-    result = run_forecast(df, date_col=date_col, value_col=value_col, periods=periods, model_type=model_key)
+    else:
+        result = run_forecast(df, date_col=date_col, value_col=value_col, periods=periods, model_type=model_key)
     
     if "error" in result:
         raise ValueError(result["error"])
 
     charts = []
-    if "forecast_values" in result:
+    
+    # Handle single model result vs comparison result
+    if model_key == "compare" and "best_result" in result:
+        best_res = result["best_result"]
+        chart = generate_forecast_chart(
+            historical_dates=best_res["historical_dates"],
+            historical_values=best_res["historical_values"],
+            forecast_dates=best_res["forecast_dates"],
+            forecast_values=best_res["forecast_values"],
+            conf_lower=best_res["confidence_lower"],
+            conf_upper=best_res["confidence_upper"],
+            value_col=best_res.get("value_column", "value"),
+            title=f"Best Model ({result['best_model_name'].upper()}) Forecast"
+        )
+        charts.append({
+            "chart_type": "line",
+            "title": f"Best Model ({result['best_model_name'].upper()}) Forecast",
+            "data": chart,
+        })
+    elif "forecast_values" in result:
         model_name_title = {
             "sarima": "SARIMA",
             "exponential_smoothing": "Exponential Smoothing",

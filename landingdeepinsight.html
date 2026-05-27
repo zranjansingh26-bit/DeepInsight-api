@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>DeepInsights</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; font-family:'Segoe UI',sans-serif; }
+
+  body {
+    background: #0a0e27;
+    background-image: 
+      linear-gradient(rgba(79,195,247,0.08) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(79,195,247,0.08) 1px, transparent 1px);
+    background-size: 40px 40px;
+    min-height: 100vh;
+    overflow-x: hidden;
+    color: #fff;
+    position: relative;
+  }
+
+  /* ---------- NAVBAR (unchanged) ---------- */
+  .navbar {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 20px 40px;
+    position: relative;
+    z-index: 10;
+  }
+  .logo { font-size: 22px; font-weight: bold; }
+  .nav-links { display: flex; gap: 30px; list-style: none; }
+  .nav-links li { cursor: pointer; font-size: 16px; }
+  .nav-links li.active { color: #4fc3f7; border-bottom: 2px solid #4fc3f7; padding-bottom:4px; }
+  .nav-right { display: flex; gap: 25px; align-items: center; }
+  .get-started {
+    background: #7b8ef5; color: #fff; border: none;
+    padding: 10px 22px; border-radius: 25px; cursor: pointer;
+    font-weight: 500;
+  }
+
+  /* ---------- INTRO OVERLAY ---------- */
+  .intro-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(5,8,25,0.97);
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: opacity 0.8s ease;
+  }
+  .intro-overlay.hidden { opacity: 0; pointer-events: none; }
+
+  .start-btn-intro {
+    position: relative;
+    padding: 30px 60px;
+    border: 2px solid #4fc3f7;
+    border-radius: 12px;
+    color: #4fc3f7;
+    font-weight: bold;
+    font-size: 22px;
+    text-align: center;
+    box-shadow: 0 0 40px rgba(79,195,247,0.7);
+    background: rgba(10,20,40,0.6);
+    letter-spacing: 2px;
+  }
+  .start-btn-intro .ripple {
+    position: absolute;
+    inset: 0;
+    border-radius: 12px;
+    border: 2px solid #4fc3f7;
+    opacity: 0;
+  }
+  .start-btn-intro.clicked .ripple {
+    animation: ripple 0.8s ease-out;
+  }
+  @keyframes ripple {
+    0% { transform: scale(1); opacity: 1; }
+    100% { transform: scale(2.5); opacity: 0; }
+  }
+
+  /* ---------- HAND (CSS-drawn, no image needed) ---------- */
+  .hand {
+    position: absolute;
+    right: -400px;
+    top: 50%;
+    transform: translateY(-50%) rotate(-15deg);
+    width: 280px;
+    height: 320px;
+    transition: right 1.2s cubic-bezier(.25,.8,.3,1),
+                transform 0.3s ease;
+    filter: drop-shadow(0 10px 25px rgba(0,0,0,0.7));
+  }
+  .hand svg { width: 100%; height: 100%; }
+  .hand.enter { right: 38%; }
+  .hand.click { transform: translateY(-45%) rotate(-8deg) scale(0.92); }
+  .hand.exit  { right: -500px; transform: translateY(-50%) rotate(-25deg); }
+
+  /* ---------- PORTAL FLASH (Dr Strange) ---------- */
+  .portal-flash {
+    position: fixed;
+    inset: 0;
+    background: radial-gradient(circle, rgba(255,140,0,0.6), rgba(255,60,0,0.3) 40%, transparent 70%);
+    z-index: 5000;
+    pointer-events: none;
+    animation: portalFlash 1.5s ease-out forwards;
+  }
+  @keyframes portalFlash {
+    0%   { opacity: 0; transform: scale(0.3); }
+    40%  { opacity: 1; transform: scale(1.2); }
+    100% { opacity: 0; transform: scale(2.5); }
+  }
+
+  /* ---------- DR STRANGE SPIN-IN ---------- */
+  .spin-in {
+    opacity: 0;
+    transform: rotate(-720deg) scale(0);
+    filter: blur(15px);
+    transition: all 1.4s cubic-bezier(.2,.8,.3,1);
+  }
+  .spin-in.show {
+    opacity: 1;
+    transform: rotate(0deg) scale(1);
+    filter: blur(0);
+  }
+
+  /* ---------- MAIN LAYOUT ---------- */
+  .main-content {
+    display: grid;
+    grid-template-columns: 1fr 2fr;
+    gap: 40px;
+    padding: 40px 60px;
+    position: relative;
+    z-index: 2;
+  }
+
+  .left-card {
+    background: rgba(10,20,45,0.5);
+    border-radius: 20px;
+    padding: 25px;
+    text-align: center;
+    border: 1px solid rgba(79,195,247,0.2);
+  }
+  .left-card .dashboard {
+    width: 100%; height: 280px;
+    background: linear-gradient(135deg, #0a1a3a, #001528);
+    border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    color: #4fc3f7;
+    box-shadow: inset 0 0 30px rgba(79,195,247,0.3);
+    margin-bottom: 25px;
+    font-size: 14px;
+  }
+  .start-btn {
+    display:inline-block;
+    padding: 14px 32px;
+    border:2px solid #4fc3f7;
+    border-radius:10px;
+    color:#4fc3f7;
+    font-weight:bold;
+    letter-spacing: 1px;
+    background: rgba(10,30,50,0.5);
+  }
+
+  .right-panel {
+    background: rgba(10,20,45,0.5);
+    border-radius: 20px;
+    padding: 25px;
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: 20px;
+    border: 1px solid rgba(79,195,247,0.2);
+  }
+  .chart-img {
+    grid-row: 1 / span 2;
+    background: linear-gradient(135deg,#1a0a05,#3a1505);
+    border-radius: 12px;
+    min-height: 380px;
+    display:flex; align-items:center; justify-content:center;
+    color:#ff8c42;
+  }
+  .eq-img {
+    background: linear-gradient(135deg,#0a1a0a,#052005);
+    border-radius: 12px;
+    min-height: 180px;
+    display:flex; align-items:center; justify-content:center;
+    color:#7fff7f;
+  }
+  .growth-img {
+    background: linear-gradient(135deg,#001a2e,#003050);
+    border-radius: 12px;
+    min-height: 180px;
+    display:flex; align-items:center; justify-content:center;
+    color:#4fc3f7;
+  }
+
+  /* ---------- FLOATING DEEPINSIGHTS TITLE ---------- */
+  .deep-title {
+    text-align: center;
+    font-size: 8rem;
+    font-weight: 900;
+    letter-spacing: 8px;
+    margin-top: 40px;
+    padding-bottom: 40px;
+    background: linear-gradient(180deg, #4fc3f7 0%, #1a3a5a 70%, #0a0e27 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    opacity: 0;
+    transition: opacity 1s ease;
+  }
+  .deep-title.show {
+    opacity: 1;
+    animation: floatTitle 4s ease-in-out infinite,
+               glowPulse 3s ease-in-out infinite;
+  }
+  @keyframes floatTitle {
+    0%,100% { transform: translateY(0); }
+    50%     { transform: translateY(-20px); }
+  }
+  @keyframes glowPulse {
+    0%,100% { filter: drop-shadow(0 0 25px rgba(79,195,247,0.5)); }
+    50%     { filter: drop-shadow(0 0 50px rgba(79,195,247,0.95)); }
+  }
+
+  @media (max-width: 900px) {
+    .main-content { grid-template-columns: 1fr; }
+    .deep-title { font-size: 4rem; letter-spacing: 4px; }
+  }
+</style>
+</head>
+<body>
+
+  <!-- NAVBAR -->
+  <nav class="navbar">
+    <div class="logo">DeepInsights</div>
+    <ul class="nav-links">
+      <li class="active">Platform</li>
+      <li>Solutions</li>
+      <li>Enterprise</li>
+    </ul>
+    <div class="nav-right">
+      <span>Contact</span>
+      <button class="get-started">Get Started</button>
+    </div>
+  </nav>
+
+  <!-- INTRO OVERLAY WITH HAND -->
+  <div class="intro-overlay" id="introOverlay">
+    <div class="start-btn-intro" id="startBtnIntro">
+      START<br>VISUALIZING
+      <div class="ripple"></div>
+    </div>
+
+    <div class="hand" id="hand">
+      <!-- Simple SVG hand pointing left -->
+      <svg viewBox="0 0 200 240" xmlns="http://www.w3.org/2000/svg">
+        <g fill="#f5c9a0" stroke="#a0744a" stroke-width="2">
+          <!-- arm -->
+          <path d="M150 180 Q190 200 200 240 L200 240 L100 240 Q110 210 120 190 Z"/>
+          <!-- palm -->
+          <ellipse cx="100" cy="140" rx="55" ry="50"/>
+          <!-- index finger pointing left -->
+          <rect x="10" y="125" width="80" height="22" rx="11"/>
+          <!-- thumb -->
+          <ellipse cx="70" cy="95" rx="14" ry="25" transform="rotate(-30 70 95)"/>
+          <!-- folded fingers -->
+          <ellipse cx="115" cy="105" rx="15" ry="20"/>
+          <ellipse cx="135" cy="115" rx="14" ry="18"/>
+          <ellipse cx="150" cy="130" rx="13" ry="16"/>
+        </g>
+        <!-- fingernail on index -->
+        <ellipse cx="18" cy="136" rx="6" ry="8" fill="#ffe0c4"/>
+      </svg>
+    </div>
+  </div>
+
+  <!-- MAIN CONTENT -->
+  <main class="main-content" id="mainContent">
+
+    <div class="left-card spin-in" data-delay="0">
+      <div class="dashboard">📊 Dashboard Visualization</div>
+      <div class="start-btn">START<br>VISUALIZING</div>
+    </div>
+
+    <div class="right-panel spin-in" data-delay="200">
+      <div class="chart-img spin-in" data-delay="500">📈 Analytics Charts</div>
+      <div class="eq-img spin-in" data-delay="700">🎚 Equalizer</div>
+      <div class="growth-img spin-in" data-delay="900">📊 Growth Stats</div>
+    </div>
+
+    <h1 class="deep-title" id="deepTitle">DEEPINSIGHTS</h1>
+  </main>
+
+<script>
+  window.addEventListener('load', () => {
+    const hand    = document.getElementById('hand');
+    const btn     = document.getElementById('startBtnIntro');
+    const overlay = document.getElementById('introOverlay');
+    const items   = document.querySelectorAll('.spin-in');
+    const title   = document.getElementById('deepTitle');
+
+    // 1. Hand slides in from right
+    setTimeout(() => hand.classList.add('enter'), 500);
+
+    // 2. Hand "clicks" the button
+    setTimeout(() => {
+      hand.classList.add('click');
+      btn.classList.add('clicked');
+    }, 1800);
+
+    // 3. Portal flash + hand exits + overlay fades
+    setTimeout(() => {
+      hand.classList.remove('click');
+      hand.classList.add('exit');
+
+      const flash = document.createElement('div');
+      flash.className = 'portal-flash';
+      document.body.appendChild(flash);
+      setTimeout(() => flash.remove(), 1500);
+
+      overlay.classList.add('hidden');
+    }, 2400);
+
+    // 4. Dr Strange spin-in for each card
+    setTimeout(() => {
+      items.forEach(el => {
+        const delay = parseInt(el.dataset.delay) || 0;
+        setTimeout(() => el.classList.add('show'), delay);
+      });
+    }, 2700);
+
+    // 5. Floating DEEPINSIGHTS appears
+    setTimeout(() => title.classList.add('show'), 4200);
+  });
+</script>
+
+</body>
+</html>

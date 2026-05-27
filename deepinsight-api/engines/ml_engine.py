@@ -124,10 +124,14 @@ class AutoMLPipeline:
                 # Evaluation
                 y_pred = model.predict(X_test)
                 y_prob = None
-                if self.problem_type == "classification" and hasattr(model, "predict_proba"):
-                    y_prob = model.predict_proba(X_test)
                 
-                metrics = EvaluationEngine.calculate_classification_metrics(y_test, y_pred, y_prob)
+                if self.problem_type == "classification":
+                    if hasattr(model, "predict_proba"):
+                        y_prob = model.predict_proba(X_test)
+                    metrics = EvaluationEngine.calculate_classification_metrics(y_test, y_pred, y_prob)
+                else:
+                    metrics = EvaluationEngine.calculate_regression_metrics(y_test, y_pred)
+                    
                 importances = EvaluationEngine.get_feature_importance(model, X_processed.columns.tolist())
                 
                 res = {

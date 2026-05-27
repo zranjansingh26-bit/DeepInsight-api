@@ -129,16 +129,54 @@ def build_context(df: pd.DataFrame, dataset_meta: dict | None = None) -> str:
     return context
 
 
+def build_followup_prompt(
+    context: str,
+    conversation_history: list[dict],
+    asked_questions: list[str] | None = None,
+) -> str:
+    """
+    Build a specialised prompt for generating smart, dataset-aware follow-up questions.
+    Avoids repeating questions already asked in the session.
+    """
+    recent_user_msgs = [
+        m["content"] for m in conversation_history[-10:] if m["role"] == "user"
+    ]
+    recent_topics = "\n".join(f"- {q}" for q in recent_user_msgs) if recent_user_msgs else "None yet"
+
+    already_asked = ""
+    if asked_questions:
+        already_asked = "\n".join(f"- {q}" for q in asked_questions[-15:])
+
+    return (
+        "You are DeepInsight AI. Based on the dataset context and conversation so far, "
+        "suggest exactly 5 smart, specific, actionable follow-up questions the user should ask next.\n\n"
+        "Rules:\n"
+        "- Questions MUST reference specific columns, metrics, or findings from the dataset context below.\n"
+        "- Questions should cover unexplored angles: forecasting, anomalies, correlations, comparisons, ML.\n"
+        "- DO NOT repeat or rephrase any previously asked question.\n"
+        "- Questions should feel like they come from a business analyst, not generic AI.\n"
+        "- Format: return ONLY a JSON array of 5 question strings, nothing else.\n\n"
+        f"Previously asked (DO NOT repeat):\n{already_asked or 'None'}\n\n"
+        f"Recent user questions in this session:\n{recent_topics}\n\n"
+        f"Dataset context:\n{context[:4000]}\n\n"
+        "Respond with a JSON array only, example: "
+        "[\"Q1?\", \"Q2?\", \"Q3?\", \"Q4?\", \"Q5?\"]"
+    )
+
+
 def build_system_prompt(context: str) -> str:
     """Build the system prompt for the LLM."""
     return (
-        "You are DeepInsight AI, a data analytics assistant. "
+        "You are DeepInsight AI, a highly intelligent data analytics assistant. "
         "You help users understand their datasets by answering questions about the data, "
         "identifying patterns, suggesting analyses, and providing actionable insights.\n\n"
         "Below is the dataset context. Use this information to answer user questions accurately.\n"
         "Always reference specific columns, values, and statistics when possible.\n"
         "If you're unsure about something, say so rather than guessing.\n\n"
-        "After your answer, suggest 2-3 follow-up questions the user might want to ask.\n"
-        "Format follow-up questions as a JSON array under the key 'follow_up_questions'.\n\n"
+        "CRITICAL INSTRUCTION: After your answer, you MUST suggest exactly 3 Context-aware AI follow-up questions. "
+        "These questions should not be generic. They MUST be based directly on the dataset context provided below "
+        "(e.g., highlighting specific anomalies detected, pointing out trends in numeric columns, or suggesting unexplored categorical columns). "
+        "For example, 'Should I investigate the anomalies in column X?' or 'Would you like to forecast column Y?'\n"
+        "Format follow-up questions as a JSON array under the key 'follow_up_questions' at the very end of your response.\n\n"
         f"---\n\n{context}"
     )

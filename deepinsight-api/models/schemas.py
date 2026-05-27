@@ -33,6 +33,7 @@ class ReportFormat(str, Enum):
     JSON = "json"
     PDF = "pdf"
     HTML = "html"
+    PPTX = "pptx"
 
 
 # ── Column Metadata ─────────────────────────────────────────
@@ -147,6 +148,12 @@ class AnalysisResponse(BaseModel):
     dataset_id: str
     analyses: list[AnalysisResult]
 
+class JobResponse(BaseModel):
+    """Response when a background job is started."""
+    job_id: str
+    status: str
+    message: str
+
 
 # ── Chat Schemas ─────────────────────────────────────────────
 
@@ -208,6 +215,21 @@ class ReportResponse(BaseModel):
     html_content: Optional[str] = None
 
 
+class ExecutiveSummaryResponse(BaseModel):
+    """Structured AI-generated executive summary for a dataset."""
+    dataset_id: str
+    dataset_name: str
+    generated_at: datetime
+    overview: str
+    performance_insights: str
+    forecast_insights: str
+    anomaly_insights: str
+    model_performance: str
+    recommendations: str
+    conclusion: str
+    raw_narrative: str
+
+
 # ── Auth Schemas ─────────────────────────────────────────────
 
 
@@ -215,3 +237,6 @@ class UserContext(BaseModel):
     """Authenticated user context extracted from JWT."""
     user_id: str
     email: Optional[str] = None
+    role: str = "member"
+    plan: str = "free"
+    trial_active: bool = False

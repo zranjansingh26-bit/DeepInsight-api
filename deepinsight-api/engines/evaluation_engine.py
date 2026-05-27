@@ -9,7 +9,8 @@ import numpy as np
 from typing import Any, Dict
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score, 
-    roc_auc_score, confusion_matrix, classification_report
+    roc_auc_score, confusion_matrix, classification_report,
+    mean_absolute_error, mean_squared_error, r2_score
 )
 
 logger = logging.getLogger(__name__)
@@ -57,6 +58,18 @@ class EvaluationEngine:
         cm = confusion_matrix(y_true, y_pred)
         metrics["confusion_matrix"] = cm.tolist()
         
+        return metrics
+
+    @staticmethod
+    def calculate_regression_metrics(y_true, y_pred) -> Dict[str, Any]:
+        """
+        Calculate MAE, RMSE, and R2 for regression models.
+        """
+        metrics = {
+            "mae": float(mean_absolute_error(y_true, y_pred)),
+            "rmse": float(np.sqrt(mean_squared_error(y_true, y_pred))),
+            "r2_score": float(r2_score(y_true, y_pred)),
+        }
         return metrics
 
     @staticmethod

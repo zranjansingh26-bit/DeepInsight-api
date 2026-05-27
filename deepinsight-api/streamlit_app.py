@@ -11,7 +11,9 @@ import pandas as pd
 import httpx
 import plotly.graph_objects as go
 import plotly.express as px
+import plotly.io as pio
 import json
+import io
 import time
 from datetime import datetime
 
@@ -20,73 +22,316 @@ from datetime import datetime
 API_BASE_URL = st.sidebar.text_input("API Base URL", value="http://localhost:8000")
 AUTH_TOKEN = st.sidebar.text_input("Auth Token (Optional)", value="", type="password")
 
+# ─────────────────────────────────────────────────────────────
+# PPTX Builder — dark enterprise theme (no API call needed)
+# ─────────────────────────────────────────────────────────────
+
+def build_section_pptx(
+    title: str,
+    subtitle: str,
+    metrics: dict,
+    findings: str,
+    recommendations: str,
+    risks: str,
+    conclusion: str,
+    dataset_name: str = "Dataset",
+    chart_fig=None,
+) -> bytes:
+    """Build a professional 6-slide dark PPTX from analysis results."""
+    from pptx import Presentation
+    from pptx.util import Inches, Pt
+    from pptx.dml.color import RGBColor
+    from pptx.enum.text import PP_ALIGN
+
+    BG   = RGBColor(0x0A, 0x0D, 0x1A)
+    CARD = RGBColor(0x0F, 0x17, 0x2A)
+    IND  = RGBColor(0x63, 0x66, 0xF1)
+    CYN  = RGBColor(0x06, 0xB6, 0xD4)
+    PUR  = RGBColor(0x8B, 0x5C, 0xF6)
+    WHT  = RGBColor(0xF8, 0xFA, 0xFC)
+    MUT  = RGBColor(0x94, 0xA3, 0xB8)
+    RED  = RGBColor(0xEF, 0x44, 0x44)
+    GRN  = RGBColor(0x10, 0xB9, 0x81)
+
+    prs = Presentation()
+    prs.slide_width  = Inches(13.33)
+    prs.slide_height = Inches(7.5)
+    blank = prs.slide_layouts[6]
+
+    def bg(slide, c=BG):
+        f = slide.background.fill; f.solid(); f.fore_color.rgb = c
+
+    def rect(slide, l, t, w, h, c):
+        s = slide.shapes.add_shape(1, l, t, w, h)
+        s.fill.solid(); s.fill.fore_color.rgb = c; s.line.fill.background()
+
+    def txt(slide, text, l, t, w, h, sz=14, bold=False, c=WHT, align=PP_ALIGN.LEFT):
+        tb = slide.shapes.add_textbox(l, t, w, h)
+        tf = tb.text_frame; tf.word_wrap = True
+        p = tf.paragraphs[0]; p.alignment = align
+        r = p.add_run(); r.text = str(text)
+        r.font.size = Pt(sz); r.font.bold = bold
+        r.font.color.rgb = c; r.font.name = "Calibri"
+
+    def line(slide, top, c=IND):
+        s = slide.shapes.add_shape(1, Inches(0.5), top, Inches(12.33), Pt(2))
+        s.fill.solid(); s.fill.fore_color.rgb = c; s.line.fill.background()
+
+    # ── Slide 1: Cover ────────────────────────────────────────
+    s = prs.slides.add_slide(blank); bg(s)
+    rect(s, Inches(0), Inches(0), Inches(0.08), Inches(7.5), IND)
+    txt(s, "DeepInsights AI", Inches(0.5), Inches(0.3), Inches(8), Inches(0.5), 12, True, IND)
+    txt(s, title, Inches(0.5), Inches(2.2), Inches(10), Inches(1.2), 36, True, WHT)
+    txt(s, subtitle, Inches(0.5), Inches(3.5), Inches(10), Inches(0.8), 15, False, MUT)
+    txt(s, f"Dataset: {dataset_name}", Inches(0.5), Inches(4.4), Inches(8), Inches(0.4), 12, False, MUT)
+    txt(s, f"Generated: {datetime.utcnow().strftime('%B %d, %Y  %H:%M UTC')}", Inches(0.5), Inches(6.9), Inches(8), Inches(0.4), 11, False, MUT)
+    rect(s, Inches(10), Inches(2), Inches(3), Inches(3.5), CARD)
+    txt(s, "AI\nPowered\nAnalytics", Inches(10.1), Inches(2.8), Inches(2.8), Inches(2.5), 22, True, PUR, PP_ALIGN.CENTER)
+
+    # ── Slide 2: Key Metrics ──────────────────────────────────
+    s = prs.slides.add_slide(blank); bg(s)
+    rect(s, Inches(0), Inches(0), Inches(0.08), Inches(7.5), CYN)
+    txt(s, "Key Performance Metrics", Inches(0.5), Inches(0.3), Inches(10), Inches(0.6), 26, True, WHT)
+    line(s, Inches(1.0), CYN)
+    cols = 4; metric_items = list(metrics.items())[:8]
+    for i, (label, val) in enumerate(metric_items):
+        col = i % cols; row = i // cols
+        lft = Inches(0.4 + col * 3.2); top = Inches(1.3 + row * 2.0)
+        rect(s, lft, top, Inches(2.9), Inches(1.6), CARD)
+        txt(s, str(val), lft + Inches(0.15), top + Inches(0.15), Inches(2.6), Inches(0.8), 24, True, IND, PP_ALIGN.CENTER)
+        txt(s, label, lft + Inches(0.15), top + Inches(1.0), Inches(2.6), Inches(0.4), 11, False, MUT, PP_ALIGN.CENTER)
+
+    # ── Slide 3: Chart (if available) ─────────────────────────
+    s = prs.slides.add_slide(blank); bg(s)
+    rect(s, Inches(0), Inches(0), Inches(0.08), Inches(7.5), PUR)
+    txt(s, "Visual Analysis", Inches(0.5), Inches(0.3), Inches(10), Inches(0.6), 26, True, WHT)
+    line(s, Inches(1.0), PUR)
+    if chart_fig is not None:
+        try:
+            img_bytes = pio.to_image(chart_fig, format="png", width=1100, height=500, scale=1.5)
+            s.shapes.add_picture(io.BytesIO(img_bytes), Inches(0.5), Inches(1.3), Inches(12.3), Inches(5.5))
+        except Exception:
+            txt(s, "Chart rendering not available. View charts in the interactive dashboard.", Inches(0.5), Inches(3.5), Inches(12), Inches(0.8), 14, False, MUT, PP_ALIGN.CENTER)
+    else:
+        txt(s, "See the interactive dashboard for visualizations.", Inches(0.5), Inches(3.5), Inches(12), Inches(0.8), 14, False, MUT, PP_ALIGN.CENTER)
+
+    # ── Slide 4: Key Findings ─────────────────────────────────
+    s = prs.slides.add_slide(blank); bg(s)
+    rect(s, Inches(0), Inches(0), Inches(0.08), Inches(7.5), GRN)
+    txt(s, "Key Findings & Insights", Inches(0.5), Inches(0.3), Inches(10), Inches(0.6), 26, True, WHT)
+    line(s, Inches(1.0), GRN)
+    txt(s, findings[:900] if findings else "No findings available.", Inches(0.5), Inches(1.3), Inches(12.3), Inches(5.5), 13, False, MUT)
+
+    # ── Slide 5: Risks & Recommendations ─────────────────────
+    s = prs.slides.add_slide(blank); bg(s)
+    rect(s, Inches(0), Inches(0), Inches(0.08), Inches(7.5), RED)
+    txt(s, "Risks & Strategic Recommendations", Inches(0.5), Inches(0.3), Inches(10), Inches(0.6), 26, True, WHT)
+    line(s, Inches(1.0), RED)
+    half = Inches(6.0)
+    txt(s, "⚠  Risk Alerts", Inches(0.5), Inches(1.1), half, Inches(0.4), 14, True, RED)
+    txt(s, risks[:400] if risks else "No risks identified.", Inches(0.5), Inches(1.6), half, Inches(2.5), 12, False, MUT)
+    txt(s, "✅  Recommendations", Inches(6.8), Inches(1.1), half, Inches(0.4), 14, True, GRN)
+    txt(s, recommendations[:400] if recommendations else "Review findings above.", Inches(6.8), Inches(1.6), half, Inches(2.5), 12, False, MUT)
+    line(s, Inches(4.4))
+    txt(s, conclusion[:250] if conclusion else "", Inches(0.5), Inches(4.6), Inches(12.3), Inches(1.5), 13, False, RGBColor(0xA5, 0xB4, 0xFC))
+
+    # ── Slide 6: Closing ──────────────────────────────────────
+    s = prs.slides.add_slide(blank); bg(s)
+    rect(s, Inches(0), Inches(0), Inches(0.08), Inches(7.5), IND)
+    txt(s, "DeepInsights", Inches(2), Inches(2.5), Inches(9.33), Inches(1.2), 48, True, WHT, PP_ALIGN.CENTER)
+    txt(s, "Enterprise AI Analytics Platform", Inches(2), Inches(3.7), Inches(9.33), Inches(0.6), 18, False, IND, PP_ALIGN.CENTER)
+    line(s, Inches(4.5))
+    txt(s, "Generated by DeepInsights AI  •  Confidential", Inches(2), Inches(4.8), Inches(9.33), Inches(0.5), 12, False, MUT, PP_ALIGN.CENTER)
+
+    out = io.BytesIO(); prs.save(out); return out.getvalue()
+
+
+# ─────────────────────────────────────────────────────────────
+# Executive Summary Caller
+# ─────────────────────────────────────────────────────────────
+
+def call_executive_summary(context: str, section_type: str, dataset_name: str = "Dataset") -> dict:
+    """Call backend /api/ai/summarize and return sections dict."""
+    try:
+        resp = httpx.post(
+            f"{API_BASE_URL}/api/ai/summarize",
+            json={"context": context, "section_type": section_type, "dataset_name": dataset_name},
+            headers={"Authorization": f"Bearer {AUTH_TOKEN}"} if AUTH_TOKEN else {},
+            timeout=45.0,
+        )
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception:
+        pass
+    return {}
+
+
+# ─────────────────────────────────────────────────────────────
+# Export Panel — rendered at the bottom of each results section
+# ─────────────────────────────────────────────────────────────
+
+def render_export_panel(
+    section_type: str,    # "ml" | "forecast" | "anomaly"
+    section_label: str,   # display name
+    metrics: dict,
+    context_str: str,
+    chart_fig=None,
+    state_key: str = "",
+):
+    """Renders the Export PPTX + Executive Summary panel."""
+    dataset_name = (st.session_state.dataset_meta or {}).get("file_name", "Dataset")
+    st.markdown("---")
+    st.markdown(
+        f'<div style="background:linear-gradient(135deg,rgba(99,102,241,0.08),rgba(139,92,246,0.08));'
+        f'border:1px solid rgba(99,102,241,0.2);border-radius:14px;padding:1.2rem 1.5rem;margin-top:0.5rem">'
+        f'<span style="font-size:1rem;font-weight:700;color:#a5b4fc">📤 Export & Insights</span>'
+        f'<span style="font-size:0.8rem;color:#64748b;margin-left:8px">— {section_label}</span></div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+
+    ec1, ec2 = st.columns(2)
+
+    # ── PPTX Export ───────────────────────────────────────────
+    with ec1:
+        summ_key = f"exec_summ_{state_key}"
+        summ = st.session_state.get(summ_key, {})
+        if st.button(f"📊 Export PPTX Report", key=f"pptx_{state_key}", use_container_width=True):
+            with st.spinner("Building enterprise PPTX…"):
+                pptx_bytes = build_section_pptx(
+                    title=f"{section_label} Report",
+                    subtitle=f"AI-Generated Analysis Report — {dataset_name}",
+                    metrics=metrics,
+                    findings=summ.get("key_findings", context_str[:600]),
+                    recommendations=summ.get("recommendations", "See full analysis for recommendations."),
+                    risks=summ.get("risks_and_alerts", "Review detailed metrics for risk signals."),
+                    conclusion=summ.get("conclusion", "Further analysis recommended."),
+                    dataset_name=dataset_name,
+                    chart_fig=chart_fig,
+                )
+                st.download_button(
+                    label="⬇ Download PPTX",
+                    data=pptx_bytes,
+                    file_name=f"DeepInsights_{section_type}_{datetime.utcnow().strftime('%Y%m%d_%H%M')}.pptx",
+                    mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                    key=f"dl_{state_key}",
+                    use_container_width=True,
+                )
+
+    # ── Executive Summary ─────────────────────────────────────
+    with ec2:
+        summ_key = f"exec_summ_{state_key}"
+        if st.button(f"✨ Generate Executive Summary", key=f"summ_{state_key}", use_container_width=True):
+            with st.spinner("AI is generating your executive summary…"):
+                result = call_executive_summary(context_str, section_type, dataset_name)
+                if result:
+                    st.session_state[summ_key] = result
+                else:
+                    st.error("Summary generation failed. Check API connection.")
+
+    # ── Show summary if already generated ─────────────────────
+    summ = st.session_state.get(f"exec_summ_{state_key}", {})
+    if summ:
+        SECTION_ICONS = {
+            "overview": ("🎯", "#6366f1"),
+            "key_findings": ("🔍", "#06b6d4"),
+            "performance_summary": ("📊", "#10b981"),
+            "risks_and_alerts": ("⚠️", "#ef4444"),
+            "recommendations": ("💡", "#f59e0b"),
+            "conclusion": ("✅", "#8b5cf6"),
+        }
+        st.markdown(
+            '<div style="background:rgba(10,13,26,0.9);border:1px solid rgba(99,102,241,0.25);'
+            'border-radius:14px;padding:1.2rem 1.5rem;margin-top:0.8rem">',
+            unsafe_allow_html=True,
+        )
+        st.markdown(f"#### 🤖 AI Executive Summary — {section_label}")
+        for key, (icon, color) in SECTION_ICONS.items():
+            val = summ.get(key, "")
+            if val:
+                label = key.replace("_", " ").title()
+                with st.expander(f"{icon}  {label}", expanded=(key in ("overview", "key_findings"))):
+                    st.markdown(
+                        f'<div style="color:#cbd5e1;line-height:1.7;font-size:0.88rem">{val}</div>',
+                        unsafe_allow_html=True,
+                    )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        # Download summary as text
+        summary_text = "\n\n".join(
+            [f"## {k.replace('_',' ').title()}\n{v}" for k, v in summ.items() if v]
+        )
+        st.download_button(
+            "📄 Download Summary (TXT)",
+            data=summary_text.encode(),
+            file_name=f"Executive_Summary_{section_type}_{datetime.utcnow().strftime('%Y%m%d')}.txt",
+            mime="text/plain",
+            key=f"dl_summ_{state_key}",
+        )
+
+
+
 # ── Custom CSS ────────────────────────────────────────────────
 
 st.markdown("""
     <style>
-    .main {
-        background-color: #0f172a;
-        color: #f8fafc;
-    }
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+    
+    .main { background: linear-gradient(160deg, #0a0f1a 0%, #0d1b2a 40%, #1b2838 100%); color: #e0e7ef; }
+    
     .stButton>button {
-        background-color: #6366f1;
-        color: white;
-        border-radius: 8px;
-        border: none;
-        padding: 0.5rem 1rem;
-        transition: all 0.3s ease;
+        background: linear-gradient(135deg, #06b6d4, #8b5cf6) !important;
+        color: white !important; border-radius: 10px; border: none;
+        padding: 0.6rem 1.4rem; font-weight: 600;
+        transition: all 0.3s ease; letter-spacing: 0.02em;
+    }
+    .stButton>button p, div[data-testid="stButton"] > button p {
+        color: inherit !important;
     }
     .stButton>button:hover {
-        background-color: #4f46e5;
-        box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
-        transform: translateY(-1px);
+        background: linear-gradient(135deg, #22d3ee, #a78bfa) !important;
+        box-shadow: 0 6px 20px rgba(6, 182, 212, 0.35); transform: translateY(-2px);
     }
     .stMetric {
-        background-color: #1e293b;
-        padding: 1.5rem;
-        border-radius: 12px;
-        border: 1px solid #334155;
-    }
-    .stFileUploader {
-        border: 2px dashed #4f46e5;
-        border-radius: 12px;
-        background-color: #1e293b;
-        padding: 1rem;
+        background: rgba(13, 27, 42, 0.8); padding: 1.5rem;
+        border-radius: 14px; border: 1px solid rgba(6, 182, 212, 0.2);
+        backdrop-filter: blur(12px);
     }
     div[data-testid="stSidebar"] {
-        background-color: #1e293b;
-        border-right: 1px solid #334155;
+        background: linear-gradient(180deg, #0d1b2a 0%, #1b2838 100%);
+        border-right: 1px solid rgba(6, 182, 212, 0.15);
     }
-    h1, h2, h3 {
-        color: #f1f5f9;
-        font-family: 'Inter', sans-serif;
-    }
+    h1, h2, h3 { color: #f0f4f8; font-family: 'Inter', sans-serif; }
+    
     .status-card {
-        background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-        padding: 2rem;
-        border-radius: 16px;
-        border-left: 5px solid #6366f1;
-        margin-bottom: 2rem;
+        background: linear-gradient(135deg, rgba(6,182,212,0.08) 0%, rgba(139,92,246,0.08) 100%);
+        padding: 2rem; border-radius: 16px;
+        border-left: 4px solid #06b6d4; margin-bottom: 1.5rem;
+        backdrop-filter: blur(10px); border: 1px solid rgba(6,182,212,0.15);
     }
     .metric-card {
-        background: #1e293b;
-        border-radius: 12px;
-        padding: 1.2rem;
-        border: 1px solid #334155;
-        text-align: center;
-        margin-bottom: 1rem;
+        background: rgba(13,27,42,0.85); border-radius: 14px;
+        padding: 1.4rem; text-align: center; margin-bottom: 1rem;
+        border: 1px solid rgba(6,182,212,0.15); backdrop-filter: blur(10px);
+        transition: transform 0.2s, box-shadow 0.2s;
     }
-    .metric-value {
-        font-size: 1.8rem;
-        font-weight: 700;
-        color: #6366f1;
+    .metric-card:hover { transform: translateY(-3px); box-shadow: 0 8px 25px rgba(6,182,212,0.15); }
+    .metric-value { font-size: 1.8rem; font-weight: 800; background: linear-gradient(135deg, #06b6d4, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .metric-label { font-size: 0.75rem; color: #7c8da0; text-transform: uppercase; letter-spacing: 0.08em; margin-top: 0.3rem; }
+    
+    .hero-banner {
+        background: linear-gradient(135deg, rgba(6,182,212,0.12), rgba(139,92,246,0.12));
+        border: 1px solid rgba(6,182,212,0.2); border-radius: 20px;
+        padding: 2.5rem; text-align: center; margin-bottom: 2rem;
     }
-    .metric-label {
-        font-size: 0.8rem;
-        color: #94a3b8;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-    }
+    .hero-banner h1 { font-size: 2.2rem; font-weight: 800; margin-bottom: 0.5rem;
+        background: linear-gradient(135deg, #22d3ee, #a78bfa, #f472b6); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .hero-banner p { color: #94a3b8; font-size: 1rem; }
+    
+    div[data-testid="stTabs"] button { color: #94a3b8 !important; font-weight: 600 !important; }
+    div[data-testid="stTabs"] button[aria-selected="true"] { color: #22d3ee !important; border-bottom-color: #06b6d4 !important; }
+    
+    .stExpander { border: 1px solid rgba(6,182,212,0.15) !important; border-radius: 12px !important; background: rgba(13,27,42,0.6) !important; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -124,21 +369,23 @@ if "dataset_meta" not in st.session_state:
 
 # ── Header ────────────────────────────────────────────────────
 
-col1, col2 = st.columns([1, 4])
-with col1:
-    st.image("https://img.icons8.com/fluency/96/artificial-intelligence.png", width=80)
-with col2:
-    st.title("DeepInsight Starter Suite")
-    st.caption("AI-Powered Analytics Dashboard")
+st.markdown("""
+<div class="hero-banner">
+    <h1>⚡ DeepInsight AI Studio</h1>
+    <p>Next-Generation Data Analytics &amp; Machine Learning Platform</p>
+</div>
+""", unsafe_allow_html=True)
 
 # ── Sidebar Status ────────────────────────────────────────────
 
-st.sidebar.markdown("### System Status")
+st.sidebar.markdown("### ⚡ System")
 is_healthy = check_health()
 if is_healthy:
-    st.sidebar.success("API Connected")
+    st.sidebar.success("🟢 API Online")
 else:
-    st.sidebar.error("API Disconnected")
+    st.sidebar.error("🔴 API Offline")
+st.sidebar.markdown("---")
+st.sidebar.markdown("**v2.0** · AI Studio")
 
 # ── Main Content ──────────────────────────────────────────────
 
@@ -303,7 +550,66 @@ with tab2:
 
 # ── Tab 3: AI Chat ────────────────────────────────────────────
 
-# Speech-to-Text: compact mic button that injects text into chat input
+# Chip CSS
+st.markdown("""
+<style>
+/* ── Follow-up question chips — dark theme ── */
+.fuq-label{font-size:11px;color:#475569;margin-bottom:6px;display:flex;align-items:center;gap:4px;}
+div[data-testid="stButton"] > button {
+    font-family:'Inter',system-ui,sans-serif !important;
+}
+/* Override chip buttons to look dark */
+div[data-testid="column"] div[data-testid="stButton"] > button {
+    background: rgba(15,23,42,0.95) !important;
+    border: 1px solid rgba(99,102,241,0.30) !important;
+    color: #a5b4fc !important;
+    border-radius: 24px !important;
+    padding: 6px 16px !important;
+    font-size: 12px !important;
+    font-weight: 500 !important;
+    transition: all 0.2s !important;
+    box-shadow: 0 0 0 0 rgba(99,102,241,0) !important;
+    white-space: normal !important;
+    word-wrap: break-word !important;
+    height: auto !important;
+    line-height: 1.4 !important;
+    text-align: left !important;
+}
+div[data-testid="column"] div[data-testid="stButton"] > button:hover {
+    background: rgba(30,41,59,0.98) !important;
+    border-color: rgba(99,102,241,0.65) !important;
+    color: #e0e7ff !important;
+    box-shadow: 0 0 16px rgba(99,102,241,0.22) !important;
+    transform: translateY(-1px) !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+def _chip_class(q):
+    l = q.lower()
+    if any(k in l for k in ["forecast","predict","future"]): return "🔵"
+    if any(k in l for k in ["anomal","outlier","risk","unusual"]): return "🔴"
+    if any(k in l for k in ["correlat","relation","between"]): return "🟣"
+    if any(k in l for k in ["trend","growth","over time","change"]): return "🟢"
+    if any(k in l for k in ["model","ml","classif","accuracy"]): return "🟡"
+    return "🔷"
+
+
+def fetch_smart_followups(session_id):
+    try:
+        resp = httpx.post(
+            f"{API_BASE_URL}/api/chat/{session_id}/followups",
+            headers=get_headers(), timeout=20.0
+        )
+        if resp.status_code == 200:
+            return resp.json().get("questions", [])
+    except Exception:
+        pass
+    return []
+
+
+# Speech-to-Text HTML
 SPEECH_TO_TEXT_HTML = """
 <div id="stt">
   <button id="mb" onclick="toggle()">
@@ -383,20 +689,11 @@ function toggle(){
   };
   rec.onresult=(e)=>{
     let f='',im='';
-    for(let i=0;i<e.results.length;i++){
-      if(e.results[i].isFinal)f+=e.results[i][0].transcript;
-      else im+=e.results[i][0].transcript;
-    }
+    for(let i=0;i<e.results.length;i++){if(e.results[i].isFinal)f+=e.results[i][0].transcript;else im+=e.results[i][0].transcript;}
     pv.textContent=f+im||'...';
     if(f){inject(f.trim());rec.stop();}
   };
-  rec.onerror=(e)=>{
-    on=false;mb.className='';dots.className='';pv.className='';
-    const m={'not-allowed':'🚫 Mic denied','no-speech':'🔇 No speech heard',
-      'audio-capture':'⚠ No mic found','network':'⚠ Network error'};
-    st.textContent=m[e.error]||('⚠ '+e.error);st.className='err';
-    clearTimeout(tid);tid=setTimeout(()=>{st.textContent='🎤 Click to speak';st.className='';},3500);
-  };
+  rec.onerror=(e)=>{on=false;mb.className='';dots.className='';pv.className='';const m={'not-allowed':'🚫 Denied','no-speech':'🔇 No speech','audio-capture':'⚠ No mic','network':'⚠ Network'};st.textContent=m[e.error]||('⚠ '+e.error);st.className='err';clearTimeout(tid);tid=setTimeout(()=>{st.textContent='🎤 Click to speak';st.className='';},3500);};
   rec.onend=()=>{on=false;mb.className='';dots.className='';pv.className='';};
   try{rec.start();}catch(x){st.textContent='⚠ Mic failed';st.className='err';}
 }
@@ -404,89 +701,105 @@ function toggle(){
 """
 
 with tab3:
+    import streamlit.components.v1 as components
+
     if not st.session_state.dataset_id:
         st.info("Upload a dataset first to start chatting.")
     else:
-        # ── Header row: title + mic button at the start ──────────
-        import streamlit.components.v1 as components
+        # ── Init session state ─────────────────────────────────
+        if "messages" not in st.session_state:
+            st.session_state.messages = []
+        if "follow_up_questions" not in st.session_state:
+            st.session_state.follow_up_questions = []
+        if "asked_questions" not in st.session_state:
+            st.session_state.asked_questions = set()
 
+        # ── Header ─────────────────────────────────────────────
         hcol1, hcol2 = st.columns([6, 1])
         with hcol1:
             st.markdown("### 💬 Chat with your Data")
-            st.caption("Ask questions like 'What is the average sales by region?' or 'Are there any anomalies?'")
+            st.caption("Smart follow-up suggestions appear after each AI response.")
         with hcol2:
             st.markdown("<div style='padding-top:8px'>", unsafe_allow_html=True)
             components.html(SPEECH_TO_TEXT_HTML, height=52)
             st.markdown("</div>", unsafe_allow_html=True)
 
-        if "messages" not in st.session_state:
-            st.session_state.messages = []
-
-        # ── TTS helper: generates a speak button for any text ────
+        # ── TTS helper ─────────────────────────────────────────
         def tts_button(text: str, key: str):
-            """Render a speak 🔊 button that reads `text` aloud via browser TTS."""
-            # Escape backticks and backslashes for JS string safety
             safe = text.replace("\\", "\\\\").replace("`", "\\`")
             html = f"""
 <div style="display:inline-block;margin-top:6px">
   <button id="tts_{key}"
     onclick="(function(){{
       const btn=document.getElementById('tts_{key}');
-      if(window.__tts_{key}_speaking){{
-        window.speechSynthesis.cancel();
-        window.__tts_{key}_speaking=false;
-        btn.innerHTML='🔊 Read aloud';
-        btn.style.color='#a5b4fc';btn.style.borderColor='#6366f1';
-        return;
-      }}
+      if(window.__tts_{key}_speaking){{window.speechSynthesis.cancel();window.__tts_{key}_speaking=false;btn.innerHTML='🔊 Read aloud';btn.style.color='#a5b4fc';return;}}
       const u=new SpeechSynthesisUtterance(`{safe}`);
       u.rate=1;u.pitch=1;u.lang='en-US';
-      u.onend=()=>{{window.__tts_{key}_speaking=false;btn.innerHTML='🔊 Read aloud';btn.style.color='#a5b4fc';btn.style.borderColor='#6366f1';}};
-      u.onerror=()=>{{window.__tts_{key}_speaking=false;btn.innerHTML='🔊 Read aloud';}};
-      window.speechSynthesis.cancel();
-      window.__tts_{key}_speaking=true;
-      btn.innerHTML='⏹ Stop';btn.style.color='#f87171';btn.style.borderColor='#ef4444';
+      u.onend=()=>{{window.__tts_{key}_speaking=false;btn.innerHTML='🔊 Read aloud';btn.style.color='#a5b4fc';}};
+      window.speechSynthesis.cancel();window.__tts_{key}_speaking=true;
+      btn.innerHTML='⏹ Stop';btn.style.color='#f87171';
       window.speechSynthesis.speak(u);
-    }})()"
-    style="background:transparent;border:1px solid #6366f1;color:#a5b4fc;
-           border-radius:20px;padding:3px 12px;font-size:12px;
-           font-family:Inter,system-ui,sans-serif;cursor:pointer;
-           transition:all 0.2s;white-space:nowrap">
+    }})()\"
+    style="background:transparent;border:1px solid #6366f1;color:#a5b4fc;border-radius:20px;padding:3px 12px;font-size:12px;cursor:pointer;white-space:nowrap">
     🔊 Read aloud
   </button>
 </div>"""
-            import streamlit.components.v1 as components
             components.html(html, height=38)
 
-        # ── Render message history ───────────────────────────────
+        # ── Render history ─────────────────────────────────────
         for i, message in enumerate(st.session_state.messages):
             with st.chat_message(message["role"]):
                 st.markdown(message["content"])
-                # Show TTS button only on assistant messages
                 if message["role"] == "assistant":
                     tts_button(message["content"], f"hist_{i}")
 
-        if prompt := st.chat_input("Type your message..."):
+        # ── Follow-up chips ────────────────────────────────────
+        pending_prompt = None
+        fuq = [q for q in st.session_state.follow_up_questions
+               if q not in st.session_state.asked_questions]
+
+        if fuq and st.session_state.messages:
+            st.markdown("**✨ Suggested follow-ups:**")
+            row1 = fuq[:3]
+            row2 = fuq[3:6]
+            cols1 = st.columns(len(row1))
+            for ci, q in enumerate(row1):
+                icon = _chip_class(q)
+                with cols1[ci]:
+                    if st.button(f"{icon} {q}", key=f"chip_{ci}_{hash(q)}", use_container_width=True):
+                        pending_prompt = q
+            if row2:
+                cols2 = st.columns(len(row2))
+                for ci, q in enumerate(row2):
+                    icon = _chip_class(q)
+                    with cols2[ci]:
+                        if st.button(f"{icon} {q}", key=f"chip2_{ci}_{hash(q)}", use_container_width=True):
+                            pending_prompt = q
+
+        # ── Input ──────────────────────────────────────────────
+        typed = st.chat_input("Ask anything about your data…")
+        prompt = pending_prompt or typed
+
+        if prompt:
+            st.session_state.asked_questions.add(prompt)
             st.session_state.messages.append({"role": "user", "content": prompt})
             with st.chat_message("user"):
                 st.markdown(prompt)
 
             with st.chat_message("assistant"):
-                message_placeholder = st.empty()
-                message_placeholder.markdown("Thinking...")
-                
+                msg_ph = st.empty()
+                msg_ph.markdown("⏳ Thinking…")
                 try:
-                    # Create session if needed
                     if "chat_session_id" not in st.session_state:
-                        session_resp = httpx.post(
+                        s_resp = httpx.post(
                             f"{API_BASE_URL}/api/chat/sessions",
                             headers=get_headers(),
                             json={"dataset_id": st.session_state.dataset_id},
                             timeout=30.0
                         )
-                        if session_resp.status_code == 200:
-                            st.session_state.chat_session_id = session_resp.json()["id"]
-                    
+                        if s_resp.status_code == 200:
+                            st.session_state.chat_session_id = s_resp.json()["id"]
+
                     if "chat_session_id" in st.session_state:
                         chat_resp = httpx.post(
                             f"{API_BASE_URL}/api/chat/{st.session_state.chat_session_id}/message",
@@ -495,17 +808,27 @@ with tab3:
                             timeout=60.0
                         )
                         if chat_resp.status_code == 200:
-                            full_response = chat_resp.json()["content"]
-                            message_placeholder.markdown(full_response)
-                            st.session_state.messages.append({"role": "assistant", "content": full_response})
-                            # TTS button for the new response
+                            data = chat_resp.json()
+                            full_response = data["content"]
+                            api_fuqs = data.get("follow_up_questions", [])
+                            msg_ph.markdown(full_response)
+                            st.session_state.messages.append(
+                                {"role": "assistant", "content": full_response}
+                            )
                             tts_button(full_response, f"new_{len(st.session_state.messages)}")
+                            # Use API follow-ups or fetch from dedicated endpoint
+                            if not api_fuqs:
+                                api_fuqs = fetch_smart_followups(
+                                    st.session_state.chat_session_id
+                                )
+                            st.session_state.follow_up_questions = api_fuqs
+                            st.rerun()
                         else:
-                            message_placeholder.markdown("Error: Could not get response from AI.")
+                            msg_ph.markdown("❌ Could not get response from AI.")
                     else:
-                        message_placeholder.markdown("Error: Could not create chat session.")
+                        msg_ph.markdown("❌ Could not create chat session.")
                 except Exception as e:
-                    message_placeholder.markdown(f"Error: {str(e)}")
+                    msg_ph.markdown(f"❌ Error: {str(e)}")
 
 
 
@@ -675,6 +998,26 @@ with tab4:
                         template="plotly_dark", color="PlotValue", color_continuous_scale="Viridis"
                     )
                     st.plotly_chart(fig_comp, use_container_width=True)
+
+                    # ── Export Panel ──────────────────────────────────
+                    res_ml = st.session_state.get("last_trained_full", {})
+                    ml_metrics_export = {}
+                    for row_m in l_data:
+                        for k, v in row_m.items():
+                            if k not in ("_sort", "Model"):
+                                ml_metrics_export[f"{row_m['Model']} {k}"] = v
+                    render_export_panel(
+                        section_type="ml",
+                        section_label="ML Model Comparison Lab",
+                        metrics=ml_metrics_export,
+                        context_str=json.dumps({
+                            "model": res_ml.get("model_name"),
+                            "metrics": res_ml.get("metrics", {}),
+                            "comparison": [{"model": m["model_name"], "time": m.get("training_time")} for m in (res_ml.get("comparison") or [])],
+                        }, default=str),
+                        chart_fig=fig_comp,
+                        state_key="ml_leaderboard",
+                    )
                 else:
                     st.info("No comparison data available yet.")
             else:
@@ -771,6 +1114,29 @@ with tab5:
                 if st.checkbox("Show Raw Forecast JSON Data"):
                     st.json(r_data)
 
+            # ── Forecast Export Panel ─────────────────────────────
+            fc_metrics = {
+                "Model": r_data.get("model_type", "N/A").upper(),
+                "Target Column": r_data.get("value_column", "N/A"),
+                "Periods Forecast": str(r_data.get("periods", periods)),
+                "Frequency": r_data.get("frequency", "N/A"),
+                "Seasonal Period": str(r_data.get("seasonal_period", "N/A")),
+            }
+            fc_fig = None
+            try:
+                if res.get("charts"):
+                    fc_fig = go.Figure(res["charts"][0]["data"])
+            except Exception:
+                pass
+            render_export_panel(
+                section_type="forecast",
+                section_label="Time Series Forecast",
+                metrics=fc_metrics,
+                context_str=json.dumps(r_data, default=str),
+                chart_fig=fc_fig,
+                state_key="forecast_results",
+            )
+
 # ── Tab 6: Anomaly Detection ──────────────────────────────────
 
 with tab6:
@@ -833,10 +1199,36 @@ with tab6:
             with st.expander("View Detailed Anomaly Stats"):
                 st.json(res.get("results", {}).get("anomalies_by_column", {}))
 
+            # ── Anomaly Export Panel ──────────────────────────────
+            an_res = res.get("results", {})
+            an_metrics = {
+                "Total Anomalies": str(an_res.get("total_anomalies", 0)),
+                "Method": an_res.get("method", an_method).upper(),
+                "Threshold": str(an_thresh),
+                "Columns Scanned": str(len(an_res.get("anomalies_by_column", {}))),
+            }
+            for col_name, col_info in list(an_res.get("anomalies_by_column", {}).items())[:4]:
+                if isinstance(col_info, dict):
+                    an_metrics[f"{col_name} anomalies"] = str(col_info.get("count", 0))
+            an_fig = None
+            try:
+                if res.get("charts"):
+                    an_fig = go.Figure(res["charts"][0]["data"])
+            except Exception:
+                pass
+            render_export_panel(
+                section_type="anomaly",
+                section_label="Anomaly Detection",
+                metrics=an_metrics,
+                context_str=json.dumps(an_res, default=str),
+                chart_fig=an_fig,
+                state_key="anomaly_results",
+            )
+
 # ── Footer ────────────────────────────────────────────────────
 
 st.markdown("---")
 st.markdown(
-    '<p style="text-align: center; color: #64748b;">DeepInsight Starter Suite v1.0.0 | Built with Streamlit & FastAPI</p>',
+    '<p style="text-align: center; color: #4a5568; font-size: 0.85rem;">⚡ DeepInsight AI Studio v2.0 · Built with FastAPI & Streamlit · Powered by Multi-Model AI</p>',
     unsafe_allow_html=True
 )

@@ -4,7 +4,7 @@ DeepInsight Starter Suite — ML Model Factory.
 Maps model names to their respective scikit-learn or XGBoost classes.
 """
 
-from sklearn.linear_model import LinearRegression, LogisticRegression
+from sklearn.linear_model import LinearRegression, LogisticRegression, Ridge, Lasso
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from sklearn.svm import SVC, SVR
@@ -25,6 +25,8 @@ class ModelFactory:
         },
         "regression": {
             "Linear Regression": LinearRegression,
+            "Ridge": Ridge,
+            "Lasso": Lasso,
             "Random Forest": RandomForestRegressor,
             "Decision Tree": DecisionTreeRegressor,
             "XGBoost": XGBRegressor,

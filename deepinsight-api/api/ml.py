@@ -13,6 +13,7 @@ from models.ml_schemas import (
     MLModelSummary, PredictionRequest, 
     PredictionResponse, TrainingHistoryItem
 )
+from models.schemas import JobResponse
 from services import ml_service
 from db import repository
 
@@ -69,19 +70,45 @@ async def run_task(
     model_name: Optional[str] = None,
     target_column: Optional[str] = None,
     k: Optional[int] = 3,
+    mode: Optional[str] = "sync",
     user: UserContext = Depends(get_current_user)
 ):
-    """Run a specific ML task (regression, classification, clustering)."""
-    try:
-        result = await ml_service.run_ml_task(
-            dataset_id=dataset_id,
-            user_id=user.user_id,
-            task_type=task_type,
-            model_name=model_name,
-            target_col=target_column,
-            k=k
-        )
-        return result
-    except Exception as e:
-        logger.error(f"Task failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    """
+    Run a specific ML task (regression, classification, clustering).
+    
+    Use mode=sync (default) for direct results, or mode=async to queue via Celery.
+    """
+    if mode == "async":
+        try:
+            from tasks.ml_tasks import run_ml_task_async
+            task = run_ml_task_async.delay(
+                dataset_id=dataset_id,
+                user_id=user.user_id,
+                task_type=task_type,
+                model_name=model_name,
+                target_col=target_column,
+                k=k
+            )
+            return JobResponse(
+                job_id=task.id,
+                status="accepted",
+                message="ML task has been queued."
+            )
+        except Exception as e:
+            logger.error(f"Async task dispatch failed: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+    else:
+        # Synchronous — run directly and return results
+        try:
+            result = await ml_service.run_ml_task(
+                dataset_id=dataset_id,
+                user_id=user.user_id,
+                task_type=task_type,
+                model_name=model_name,
+                target_col=target_column,
+                k=k
+            )
+            return result
+        except Exception as e:
+            logger.error(f"Task failed: {e}")
+            raise HTTPException(status_code=500, detail=str(e))

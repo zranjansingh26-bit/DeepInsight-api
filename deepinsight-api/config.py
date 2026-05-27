@@ -40,10 +40,20 @@ class Settings(BaseSettings):
     gmail_user: Optional[str] = None
     gmail_app_password: Optional[str] = None
 
+    # ── Stripe ───────────────────────────────────────────────
+    stripe_api_key: Optional[str] = None
+    stripe_webhook_secret: Optional[str] = None
+
+    # ── Observability ────────────────────────────────────────
+    sentry_dsn: Optional[str] = None
+
+    # ── Redis / Celery ───────────────────────────────────────
+    redis_url: str = "redis://localhost:6379/0"
+
     # ── Application ──────────────────────────────────────────
     app_env: str = "development"
     app_name: str = "DeepInsight Starter Suite"
-    app_version: str = "1.0.0"
+    app_version: str = "2.0.0"
     log_level: str = "INFO"
     cors_origins: str = "*"
 
@@ -53,6 +63,9 @@ class Settings(BaseSettings):
 
     # ── Limits ───────────────────────────────────────────────
     max_upload_size_mb: int = 50
+
+    # ── Frontend ─────────────────────────────────────────────
+    frontend_url: str = "http://localhost:3000"
 
     @property
     def cors_origin_list(self) -> list[str]:
@@ -74,6 +87,14 @@ class Settings(BaseSettings):
     @property
     def has_gemini(self) -> bool:
         return bool(self.gemini_api_key)
+
+    @property
+    def has_stripe(self) -> bool:
+        return bool(self.stripe_api_key)
+
+    @property
+    def has_resend(self) -> bool:
+        return bool(self.resend_api_key)
 
     @property
     def active_llm(self) -> str:

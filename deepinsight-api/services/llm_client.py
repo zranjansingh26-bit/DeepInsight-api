@@ -29,27 +29,76 @@ async def chat_completion(
     chat_history: list[dict[str, str]] | None = None,
 ) -> LLMResponse:
     """
-    Send a chat completion request to the configured LLM provider.
+    Send a chat completion request to the configured LLM provider, with fallback.
     """
     settings = get_settings()
-    provider = settings.active_llm
+    providers = ["openai", "claude", "gemini"]
+    
+    # Try the configured active_llm first, then fallback to others
+    if settings.active_llm in providers:
+        providers.remove(settings.active_llm)
+        providers.insert(0, settings.active_llm)
 
-    if provider == "claude":
-        return await _anthropic_completion(
-            system_prompt, user_message, chat_history, settings.anthropic_api_key
-        )
-    elif provider == "openai":
-        return await _openai_completion(
-            system_prompt, user_message, chat_history, settings.openai_api_key
-        )
-    elif provider == "gemini":
-        return await _gemini_completion(
-            system_prompt, user_message, chat_history, settings.gemini_api_key
-        )
-    else:
-        raise RuntimeError(
-            "No LLM provider configured or keys missing. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or GEMINI_API_KEY."
-        )
+    last_error = None
+    for provider in providers:
+        try:
+            if provider == "claude" and settings.anthropic_api_key:
+                return await _anthropic_completion(system_prompt, user_message, chat_history, settings.anthropic_api_key)
+            elif provider == "openai" and settings.openai_api_key:
+                return await _openai_completion(system_prompt, user_message, chat_history, settings.openai_api_key)
+            elif provider == "gemini" and settings.gemini_api_key:
+                return await _gemini_completion(system_prompt, user_message, chat_history, settings.gemini_api_key)
+        except Exception as e:
+            logger.warning(f"Provider {provider} failed: {e}. Trying next fallback...")
+            last_error = e
+            
+    raise RuntimeError(f"All LLM providers failed. Last error: {last_error}")
+
+async def chat_completion_stream(
+    system_prompt: str,
+    user_message: str,
+    chat_history: list[dict[str, str]] | None = None,
+):
+    """
+    Yields chunks of the response from the LLM.
+    Currently uses OpenAI for streaming, with simple fallback to non-streaming if keys are missing.
+    """
+    settings = get_settings()
+    
+    # Simplified streaming using OpenAI as primary for MVP, 
+    # a full implementation would implement async generators for all 3 providers.
+    if settings.openai_api_key:
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(api_key=settings.openai_api_key)
+        
+        messages = [{"role": "system", "content": system_prompt}]
+        if chat_history:
+            for msg in chat_history[-10:]:
+                messages.append({"role": msg["role"], "content": msg["content"]})
+        messages.append({"role": "user", "content": user_message})
+        
+        try:
+            stream = await client.chat.completions.create(
+                model="gpt-4o",
+                messages=messages,
+                max_tokens=2048,
+                stream=True
+            )
+            async for chunk in stream:
+                if chunk.choices and chunk.choices[0].delta.content:
+                    yield chunk.choices[0].delta.content
+            return
+        except Exception as e:
+            logger.error(f"OpenAI streaming failed: {e}")
+            # Fall through to standard blocking call
+            
+    # Fallback to non-streaming if streaming fails or not using OpenAI
+    resp = await chat_completion(system_prompt, user_message, chat_history)
+    # Fake stream the response
+    words = resp.answer.split(" ")
+    for word in words:
+        yield word + " "
+
 
 
 async def _anthropic_completion(
