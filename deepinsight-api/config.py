@@ -64,9 +64,6 @@ class Settings(BaseSettings):
     # ── Limits ───────────────────────────────────────────────
     max_upload_size_mb: int = 50
 
-    # ── Frontend ─────────────────────────────────────────────
-    frontend_url: str = "http://localhost:3000"
-
     @property
     def cors_origin_list(self) -> list[str]:
         """Parse comma-separated CORS origins."""

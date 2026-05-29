@@ -1,0 +1,7 @@
+{
+    "python.defaultInterpreterPath": "${workspaceFolder}\\deepinsight-api\\.venv\\Scripts\\python.exe",
+    "python.analysis.extraPaths": [
+        "${workspaceFolder}\\deepinsight-api\\.venv\\Lib\\site-packages"
+    ],
+    "go.toolsManagement.checkForUpdates": "proxy"
+}

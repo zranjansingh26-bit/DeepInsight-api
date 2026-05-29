@@ -27,9 +27,8 @@ class TestHealthEndpoints:
     def test_root(self):
         response = client.get("/")
         assert response.status_code == 200
-        data = response.json()
-        assert data["status"] == "healthy"
-        assert "version" in data
+        assert "text/html" in response.headers["content-type"]
+        assert "<html" in response.text or "<!DOCTYPE html" in response.text
 
     def test_health(self):
         response = client.get("/health")
@@ -54,6 +53,11 @@ class TestDatasetEndpoints:
     def test_get_dataset_no_auth(self):
         """Get dataset without auth should return 401."""
         response = client.get("/api/datasets/some-id")
+        assert response.status_code == 401
+
+    def test_list_datasets_no_auth(self):
+        """List datasets without auth should return 401."""
+        response = client.get("/api/datasets/")
         assert response.status_code == 401
 
 

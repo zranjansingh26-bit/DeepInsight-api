@@ -9,7 +9,7 @@ import logging
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from api.auth import get_current_user
-from models.schemas import DatasetDetail, DatasetUploadResponse, UserContext
+from models.schemas import DatasetDetail, DatasetUploadResponse, UserContext, DatasetListItem
 from services import dataset_service
 
 logger = logging.getLogger(__name__)
@@ -54,6 +54,25 @@ async def upload_dataset(
         raise HTTPException(
             status_code=500,
             detail="Upload failed due to an internal server error. Please try again."
+        )
+@router.get(
+    "/",
+    response_model=list[DatasetListItem],
+    summary="List all datasets",
+    description="Retrieve a list of all datasets uploaded by the current user.",
+)
+async def list_datasets(
+    user: UserContext = Depends(get_current_user),
+):
+    """List datasets for the authenticated user."""
+    try:
+        datasets = dataset_service.list_user_datasets(user.user_id)
+        return datasets
+    except Exception as e:
+        logger.exception("Failed to list datasets: %s", str(e))
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to retrieve datasets. Please try again."
         )
 
 

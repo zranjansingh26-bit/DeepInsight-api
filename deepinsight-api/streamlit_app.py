@@ -19,8 +19,9 @@ from datetime import datetime
 
 # ── Configuration ─────────────────────────────────────────────
 
+query_token = st.query_params.get("token", "")
 API_BASE_URL = st.sidebar.text_input("API Base URL", value="http://localhost:8000")
-AUTH_TOKEN = st.sidebar.text_input("Auth Token (Optional)", value="", type="password")
+AUTH_TOKEN = st.sidebar.text_input("Auth Token (Optional)", value=query_token, type="password")
 
 # ─────────────────────────────────────────────────────────────
 # PPTX Builder — dark enterprise theme (no API call needed)

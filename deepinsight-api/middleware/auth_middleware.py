@@ -24,7 +24,6 @@ EXEMPT_PATHS = {
 EXEMPT_PREFIXES = (
     "/api/auth/",
     "/api/billing/webhook",
-    "/app/",           # Static frontend
     "/_next/",         # Next.js assets
     "/favicon",
 )

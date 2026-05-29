@@ -197,24 +197,6 @@ app.include_router(organizations_router, prefix="/api/orgs", tags=["Organization
 app.include_router(schedules_router, prefix="/api/schedules", tags=["Schedules"])
 app.include_router(ai_utils_router, tags=["AI Utilities"])
 
-# ── Serve Frontend Static Files ─────────────────────
-app.mount("/app", StaticFiles(directory="frontend", html=True), name="frontend")
-
-
-# ── Health Check ─────────────────────────────────────────────
-
-
-@app.get("/", tags=["Health"])
-@limiter.limit("5/minute")
-async def root(request: Request):
-    """Health check endpoint."""
-    return {
-        "status": "healthy",
-        "service": settings.app_name,
-        "version": settings.app_version,
-        "environment": settings.app_env,
-    }
-
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host=settings.host, port=settings.port, reload=True)
@@ -230,3 +212,10 @@ async def health():
         "supabase_configured": bool(settings.supabase_url),
         "llm_configured": settings.has_anthropic or settings.has_openai,
     }
+
+
+# ── Serve Landing Page ───────────────────────────────────────
+import os
+_current_dir = os.path.dirname(os.path.abspath(__file__))
+_landing_dir = os.path.abspath(os.path.join(_current_dir, "..", "deepinsight-landing", "out"))
+app.mount("/", StaticFiles(directory=_landing_dir, html=True), name="landing")
